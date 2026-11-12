@@ -1,0 +1,19 @@
+{
+  "id": "noir",
+  "name": "Noir",
+  "blurb": "Dark card, rounded picture window on top, clean light text. Easy on ink.",
+  "style": "noir",
+  "art_box": [34, 118, 682, 470],
+  "name_box": [34, 34, 682, 70],
+  "type_box": [34, 604, 682, 52],
+  "text_box": [34, 670, 682, 280],
+  "pt_box": [566, 956, 150, 64],
+  "ink": "#f0eee8",
+  "body_ink": "#dcdad4",
+  "pt_ink": "#ffffff",
+  "footer_ink": "#8d8d94",
+  "footer_xy": [300, 1030],
+  "text_size": 30,
+  "text_min": 16,
+  "flavor": false
+}

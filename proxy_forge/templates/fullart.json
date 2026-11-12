@@ -1,0 +1,20 @@
+{
+  "id": "fullart",
+  "name": "Full art",
+  "blurb": "The picture fills the whole card; the text sits on translucent panels.",
+  "style": "fullart",
+  "art_box": [0, 0, 750, 1050],
+  "name_box": [36, 30, 678, 70],
+  "type_box": [34, 618, 682, 56],
+  "text_box": [34, 686, 682, 250],
+  "pt_box": [548, 940, 168, 70],
+  "ink": "#f4f4f4",
+  "body_ink": "#f1f1f1",
+  "pt_ink": "#ffffff",
+  "shadow": true,
+  "footer_ink": "#d0d0d0",
+  "footer_xy": [375, 1022],
+  "text_size": 30,
+  "text_min": 16,
+  "flavor": false
+}

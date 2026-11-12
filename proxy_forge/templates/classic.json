@@ -1,0 +1,23 @@
+{
+  "id": "classic",
+  "name": "Classic",
+  "blurb": "Magic's modern frame: bevelled name and type plates, parchment rules box, black border.",
+  "style": "classic",
+  "frame_box": [30, 30, 690, 968],
+  "art_box": [62, 118, 626, 454],
+  "name_box": [48, 44, 654, 62],
+  "type_box": [48, 582, 654, 54],
+  "text_box": [56, 648, 638, 286],
+  "pt_box": [534, 940, 164, 62],
+  "ink": "#101010",
+  "name_size": 40,
+  "type_size": 34,
+  "plate_pad": 20,
+  "pt_size": 44,
+  "footer_ink": "#d8d8d8",
+  "footer_xy": [375, 1026],
+  "text_size": 32,
+  "text_min": 17,
+  "text_pad": 20,
+  "flavor": false
+}

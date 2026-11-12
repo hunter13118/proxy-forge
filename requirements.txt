@@ -1,0 +1,7 @@
+-e ../studio-kit
+fastapi
+uvicorn
+python-multipart
+pillow
+httpx
+pytest

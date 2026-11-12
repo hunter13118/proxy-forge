@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+extra.env
+tunnel-token.txt
+cloudflared/*.json
+logs/
+# user data lives on G:, but never let a photo or a generated card in by accident
+*.jpg
+*.jpeg
+*.png
+*.pdf
+!proxy_forge/web/**/*.png
+
+# Wizards of the Coast fonts, fetched for personal use: never committed
+fonts/beleren.ttf
+fonts/mplantin.ttf
+cloudflared/

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "proxy-forge",
+      "runtimeExecutable": "D:\\proxy-forge\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": ["-m", "proxy_forge"],
+      "port": 7870
+    }
+  ]
+}

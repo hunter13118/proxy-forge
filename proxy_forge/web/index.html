@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>proxy-forge</title>
+<link rel="stylesheet" href="/app/style.css?v={{v}}">
+</head>
+<body>
+<header>
+  <h1>proxy-forge</h1>
+  <div class="status" id="status"></div>
+  <div id="who" hidden></div>
+</header>
+
+<div id="gate" hidden><div><h2>proxy-forge</h2><p>Sign in to continue.</p><div id="gate-box"></div></div></div>
+
+<main>
+  <aside id="side">
+    <section id="s-style">
+      <h2><span>1</span> Style</h2>
+      <div class="row">
+        <select id="profile"></select>
+        <button id="profile-new" class="ghost">New</button>
+      </div>
+      <label>Direction <small>how the art should feel</small></label>
+      <textarea id="direction" rows="3" placeholder="e.g. warm watercolor, golden-hour light, the heroes look like my friends"></textarea>
+      <div class="row">
+        <div class="grow"><label>LoRA <small>optional</small></label><select id="lora"></select></div>
+        <div class="narrow"><label>Strength</label><input id="lora-strength" type="number" min="0" max="1.5" step="0.1" value="0.8"></div>
+      </div>
+      <div class="cartoon">
+        <label class="check"><input id="cartoon-on" type="checkbox" checked> Keep the cartoon look on people drawn with a LoRA</label>
+        <div id="cartoon-opts">
+          <label>Cartoon strength <b id="cartoon-val"></b></label>
+          <input id="cartoon-strength" type="range" min="0.1" max="0.8" step="0.05" value="0.4">
+          <div class="desc">A LoRA trained on photos drags the picture toward a photograph. With this on, those pictures get cartoon style words and then a second pass through the plain cartoon model. Higher keeps more of the cartoon look but loosens the likeness; lower keeps the likeness but looks more like a photo. Costs a few extra seconds per card.</div>
+          <label>Cartoon words</label>
+          <input id="cartoon-tags" placeholder="cartoon, anime style, cel shading, ...">
+        </div>
+      </div>
+      <label>People <small>photos become a written description; the photos never leave this PC</small></label>
+      <div id="subjects"></div>
+      <button id="subject-new" class="ghost">+ Add a person</button>
+    </section>
+
+    <section id="s-template">
+      <h2><span>2</span> Template</h2>
+      <div id="templates" class="tiles"></div>
+    </section>
+
+    <section id="s-deck">
+      <h2><span>3</span> Deck</h2>
+      <div class="row">
+        <select id="deck-pick"></select>
+        <button id="deck-delete" class="ghost danger" title="Delete this deck">Delete</button>
+      </div>
+      <input id="deck-name" placeholder="Deck name" value="My deck">
+      <textarea id="deck-text" rows="7" placeholder="4 Lightning Bolt&#10;1 Sol Ring&#10;24 Mountain"></textarea>
+      <label class="check"><input id="deck-sb" type="checkbox"> include the sideboard</label>
+      <button id="deck-import" class="primary">Import deck</button>
+      <div id="deck-notes"></div>
+    </section>
+
+    <section id="s-gen">
+      <h2><span>4</span> Make it</h2>
+      <button id="gen" class="primary" disabled>Generate art</button>
+      <button id="regen" class="ghost" disabled title="Write every prompt again from the current style, then draw again">Rewrite prompts &amp; redraw all</button>
+      <div id="progress" hidden>
+        <div class="bar"><i id="bar"></i></div>
+        <div class="row"><span id="progress-msg"></span><button id="cancel" class="ghost">Cancel</button></div>
+      </div>
+      <div class="row">
+        <a id="pdf-letter" class="btn" href="#">PDF · Letter</a>
+        <a id="pdf-a4" class="btn" href="#">PDF · A4</a>
+        <a id="zip" class="btn" href="#">PNGs</a>
+      </div>
+    </section>
+  </aside>
+
+  <section id="grid-wrap">
+    <div id="empty">Pick a style and a template, paste a deck list, and import it. Your cards show up here.</div>
+    <div id="grid"></div>
+  </section>
+</main>
+
+<dialog id="modal">
+  <div class="modal-body">
+    <img id="m-img" alt="">
+    <div class="m-side">
+      <h3 id="m-name"></h3>
+      <label>Art prompt</label>
+      <textarea id="m-prompt" rows="9"></textarea>
+      <div class="row"><div class="grow"><label>Seed</label><input id="m-seed" type="number"></div></div>
+      <div id="m-subjects"></div>
+      <p id="m-error" class="err"></p>
+      <div class="row wrap">
+        <button id="m-save" class="primary">Save &amp; redraw</button>
+        <button id="m-reroll" class="ghost">New seed &amp; redraw</button>
+        <button id="m-rewrite" class="ghost">Rewrite prompt</button>
+        <button id="m-close" class="ghost">Close</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+<script src="/app/app.js?v={{v}}"></script>
+</body>
+</html>
