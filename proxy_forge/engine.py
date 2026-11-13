@@ -18,7 +18,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import config, deck as decklist, lora_train, prompts, references, render, store
+from . import config, deck as decklist, export, lora_train, prompts, references, render, store
 from .scryfall import Scryfall, units as card_units
 from .studio import Cancelled, Studio
 
@@ -319,13 +319,15 @@ class Engine:
             job.done, job.msg = job.total, "cards redrawn"
         return self.submit("render", did, run)
 
-    def card_images(self, did: str, copies: bool = True) -> list[tuple[str, Path]]:
-        """(file name, card picture) for each card in print order, repeated by the number of copies in the deck list when `copies`."""
+    def card_images(self, did: str, copies: bool = True, skip_basics: bool = False) -> list[tuple[str, Path]]:
+        """(file name, card picture) for each card in print order, repeated by the number of copies in the deck list when `copies`; basic lands left out when `skip_basics` (saves sheets)."""
         deck = store.get_deck(did)
         out = []
         for k in deck["order"]:
-            p = self.ensure_card(did, k)
             u = deck["units"][k]
+            if skip_basics and export.is_basic_land(u["name"]):
+                continue
+            p = self.ensure_card(did, k)
             for c in range(u["copies"] if copies else 1):
                 out.append((f"{len(out) + 1:03d} {render_safe(u['name'])}.png", p))
         return out

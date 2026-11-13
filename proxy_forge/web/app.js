@@ -238,7 +238,7 @@ function renderDeck() {
   const links = { "pdf-letter": "export.pdf?paper=letter", "pdf-a4": "export.pdf?paper=a4", zip: "export.zip" };
   for (const [id, q] of Object.entries(links)) {
     const a = $(id);
-    a.dataset.url = d ? `/api/decks/${d.id}/${q}` : "";
+    a.dataset.url = d ? `/api/decks/${d.id}/${q}${id.startsWith("pdf-") && $("skip-basics").checked ? "&skip_basics=true" : ""}` : "";
     a.dataset.name = d ? `${d.name}-${id.replace("pdf-", "")}.${id === "zip" ? "zip" : "pdf"}` : "";
     a.style.opacity = d ? 1 : 0.45; a.style.pointerEvents = d ? "auto" : "none";
   }
@@ -335,6 +335,7 @@ $("cartoon-on").onchange = () => { showCartoon(); saveProfile(); };
 $("cartoon-strength").oninput = () => { showCartoon(); saveProfile(); };
 $("cartoon-tags").oninput = saveProfile;
 $("subject-new").onclick = async () => { const name = prompt("Their name (only used as a label)"); if (name) { await api(`/api/profiles/${S.profile.id}/subjects`, { method: "POST", json: { name } }); refreshProfile(); } };
+$("skip-basics").onchange = () => renderDeck();
 for (const id of ["pdf-letter", "pdf-a4", "zip"]) $(id).onclick = (e) => { e.preventDefault(); const a = $(id); if (a.dataset.url) saveAs(a.dataset.url, a.dataset.name); };
 $("deck-pick").onchange = () => openDeck($("deck-pick").value);
 $("deck-delete").onclick = async () => {

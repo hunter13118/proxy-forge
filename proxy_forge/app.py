@@ -345,12 +345,18 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
         return FileResponse(art_path(u["art"]), media_type="image/png")
 
     @app.get("/api/decks/{did}/export.pdf")
-    def export_pdf(did: str, paper: str = "letter", copies: bool = True):
+    def export_pdf(did: str, paper: str = "letter", copies: bool = True, size: str = "mtg", margin: float = 5.0, gap: float = 0.0, turn: str = "auto", marks: bool = True, skip_basics: bool = False):
         d = _need(store.get_deck(did), "no such deck")
-        imgs = [p for _, p in eng.card_images(did, copies)]
+        if paper not in export.PAPER or size not in export.CARD_MM or turn not in ("auto", "never", "always") or not 0 <= margin <= 30 or not 0 <= gap <= 20:
+            raise HTTPException(400, "bad print options")
+        imgs = [p for _, p in eng.card_images(did, copies, skip_basics)]
         if not imgs:
             raise HTTPException(400, "no cards")
-        return Response(export.pdf_bytes(imgs, paper), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{safe(d["name"])}-{paper}.pdf"'})
+        try:
+            pdf = export.pdf_bytes(imgs, paper, size=size, margin_mm=margin, gap_mm=gap, turn=turn, marks=marks)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{safe(d["name"])}-{paper}.pdf"'})
 
     @app.get("/api/decks/{did}/export.zip")
     def export_zip(did: str, copies: bool = False):

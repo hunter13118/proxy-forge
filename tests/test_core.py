@@ -1,5 +1,6 @@
 import io
 
+import pytest
 from PIL import Image
 
 from proxy_forge import deck, export, prompts, render
@@ -80,6 +81,31 @@ def test_pdf_nine_per_page_with_cut_marks(tmp_path):
     assert len(pages) == 2 and pages[0].size == (2550, 3300)
     pdf = export.pdf_bytes(cards, "a4")
     assert pdf.startswith(b"%PDF")
+
+
+def test_a4_packs_nine_cards_at_real_card_size_with_room_for_cut_marks():
+    lay = export.best_layout("a4")
+    assert lay.page == (2480, 3508) and (lay.cols, lay.rows, lay.turned) == (3, 3, False) and lay.per_page == 9
+    assert lay.card == (744, 1039)                                              # 63 x 88 mm at 300 dpi
+    assert lay.origin[0] > 0 and lay.origin[1] > 0
+    right, bottom = lay.origin[0] + 3 * lay.card[0], lay.origin[1] + 3 * lay.card[1]
+    assert right <= lay.page[0] - export._px(5) and bottom <= lay.page[1] - export._px(5)        # inside the printer-safe margin
+    assert export.best_layout("a4", margin_mm=0).per_page == 9                  # even with no margin, no tenth card fits
+    assert export.best_layout("a4", turn="always").per_page == 8                # turned cards: 2 x 4
+    with pytest.raises(ValueError):
+        export.best_layout("a4", margin_mm=100)
+
+
+def test_sheets_place_cards_without_gaps_and_count_pages(tmp_path):
+    p = tmp_path / "c.png"
+    Image.new("RGB", (750, 1050), (200, 30, 30)).save(p)
+    pages = export.sheets([p] * 10, "a4")
+    assert len(pages) == 2 and export.pages_needed(10, "a4") == 2 and export.pages_needed(9, "a4") == 1
+    lay = export.best_layout("a4")
+    x, y = lay.cell(4)
+    assert pages[0].getpixel((x + 5, y + 5)) == (200, 30, 30) and pages[0].getpixel((x - 3, y + 5)) == (200, 30, 30)      # the neighbour card touches
+    assert pages[1].getpixel(lay.cell(1)) == (255, 255, 255)                                                           # second sheet: one card, rest blank
+    assert export.is_basic_land("Snow-Covered Island") and export.is_basic_land("forest") and not export.is_basic_land("Forest Bear")
 
 
 def test_mana_symbols_draw_their_icon_from_the_mana_font():
