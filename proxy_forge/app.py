@@ -403,7 +403,7 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
         return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}-{paper}.pdf"'})
 
     @app.get("/api/duplex-test.pdf")
-    def duplex_test(paper: str = "a4", size: str = "mtg", flip: str = "long", turn: str = "auto", margin: float = 5.0, back_dx: float = 0.0, back_dy: float = 0.0):
+    def duplex_test(paper: str = "letter", size: str = "mtg", flip: str = "long", turn: str = "auto", margin: float = 5.0, back_dx: float = 0.0, back_dy: float = 0.0):
         """Two pages for checking a printer: print both sides, hold it to the light."""
         if paper not in export.PAPER or flip not in export.FLIPS or turn not in ("auto", "never", "always") or size not in export.CARD_MM:
             raise HTTPException(400, "bad options")

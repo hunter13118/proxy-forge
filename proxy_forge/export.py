@@ -47,7 +47,7 @@ class Layout:
         return self.origin[0] + (n % self.cols) * (self.card[0] + self.gap), self.origin[1] + (n // self.cols) * (self.card[1] + self.gap)
 
 
-def best_layout(paper: str = "a4", size: str = "mtg", margin_mm: float = 5.0, gap_mm: float = 0.0, turn: str = "auto") -> Layout:
+def best_layout(paper: str = "letter", size: str = "mtg", margin_mm: float = 5.0, gap_mm: float = 0.0, turn: str = "auto") -> Layout:
     """The arrangement with the most cards per page. `margin_mm` is the blank border the printer cannot reach; `turn` is auto | never | always."""
     pw, ph = PAPER.get(paper, PAPER["letter"])
     cw, ch = (_px(v) for v in CARD_MM.get(size, CARD_MM["mtg"]))
@@ -68,7 +68,7 @@ def best_layout(paper: str = "a4", size: str = "mtg", margin_mm: float = 5.0, ga
 
 
 def _cut_marks(d: ImageDraw.ImageDraw, lay: Layout) -> None:
-    """Short ticks in the margins at every card edge, kept clear of the card block by a few mm."""
+    """Ticks at every card edge, running from just outside the card block out to the edge of the page (as far as the page goes; a printer clips what it cannot reach)."""
     pw, ph = lay.page
     (ox, oy), (cw, ch), g = lay.origin, lay.card, lay.gap
     right, bottom = ox + lay.cols * cw + (lay.cols - 1) * g, oy + lay.rows * ch + (lay.rows - 1) * g
@@ -77,14 +77,14 @@ def _cut_marks(d: ImageDraw.ImageDraw, lay: Layout) -> None:
     off, ink = _px(0.7), "#777"
     for x in xs:
         if oy - off > 4:
-            d.line((x, max(0, oy - off - _px(3.4)), x, oy - off), fill=ink, width=2)
+            d.line((x, 0, x, oy - off), fill=ink, width=2)
         if bottom + off < ph - 4:
-            d.line((x, bottom + off, x, min(ph, bottom + off + _px(3.4))), fill=ink, width=2)
+            d.line((x, bottom + off, x, ph), fill=ink, width=2)
     for y in ys:
         if ox - off > 4:
-            d.line((max(0, ox - off - _px(3.4)), y, ox - off, y), fill=ink, width=2)
+            d.line((0, y, ox - off, y), fill=ink, width=2)
         if right + off < pw - 4:
-            d.line((right + off, y, min(pw, right + off + _px(3.4)), y), fill=ink, width=2)
+            d.line((right + off, y, pw, y), fill=ink, width=2)
 
 
 def sheets(images: list[Path], paper: str = "letter", size: str = "mtg", margin_mm: float = 5.0, gap_mm: float = 0.0, turn: str = "auto", marks: bool = True) -> list[Image.Image]:
@@ -106,7 +106,7 @@ def sheets(images: list[Path], paper: str = "letter", size: str = "mtg", margin_
     return pages
 
 
-def pages_needed(count: int, paper: str = "a4", **kw) -> int:
+def pages_needed(count: int, paper: str = "letter", **kw) -> int:
     return math.ceil(count / best_layout(paper, **kw).per_page)
 
 
@@ -190,7 +190,7 @@ def back_angle(lay: Layout, flip: str) -> int:
     return 90 if lay.turned else 180
 
 
-def duplex_pages(pairs: list[tuple[Path, Path | None]], paper: str = "a4", size: str = "mtg", margin_mm: float = 5.0, gap_mm: float = 0.0, turn: str = "auto", marks: bool = True,
+def duplex_pages(pairs: list[tuple[Path, Path | None]], paper: str = "letter", size: str = "mtg", margin_mm: float = 5.0, gap_mm: float = 0.0, turn: str = "auto", marks: bool = True,
                  flip: str = "long", dx_mm: float = 0.0, dy_mm: float = 0.0) -> tuple[list[Image.Image], list[Image.Image]]:
     """(front pages, back pages), page i of each belonging to the same sheet. `pairs` is (front picture, back picture or None)."""
     if flip not in FLIPS:
@@ -242,7 +242,7 @@ def pages_pdf(pages: list[Image.Image]) -> bytes:
     return buf.getvalue()
 
 
-def test_sheets(paper: str = "a4", size: str = "mtg", margin_mm: float = 5.0, turn: str = "auto", flip: str = "long", dx_mm: float = 0.0, dy_mm: float = 0.0) -> list[Image.Image]:
+def test_sheets(paper: str = "letter", size: str = "mtg", margin_mm: float = 5.0, turn: str = "auto", flip: str = "long", dx_mm: float = 0.0, dy_mm: float = 0.0) -> list[Image.Image]:
     """Two pages for checking a printer before printing a deck: slot numbers and a TOP arrow on the front, the same on the back where each back belongs (mirrored slot, turned to match),
     and a cross at the centre of every slot on both sides. Print both sides, hold the sheet to a window: the crosses must coincide and the numbers must read the same way up."""
     from . import render
