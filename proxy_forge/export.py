@@ -67,24 +67,39 @@ def best_layout(paper: str = "letter", size: str = "mtg", margin_mm: float = 5.0
     return Layout((pw, ph), (w, h), cols, rows, turned, gap, (ox, oy))
 
 
+DASH, GAP, MARK_W, MARK_INK = 20, 12, 4, "#111"                       # px at 300 dpi: 1.7 mm dashes, 1 mm gaps, 0.34 mm wide, near-black (the old 0.17 mm grey ticks vanished in some printers)
+
+
+def _dashed(d: ImageDraw.ImageDraw, p0: tuple[int, int], p1: tuple[int, int]) -> None:
+    """A dashed straight line (horizontal or vertical), starting with a dash at p0."""
+    (x0, y0), (x1, y1) = p0, p1
+    length = abs(x1 - x0) + abs(y1 - y0)
+    dx, dy = (0 if x1 == x0 else (1 if x1 > x0 else -1)), (0 if y1 == y0 else (1 if y1 > y0 else -1))
+    t = 0
+    while t < length:
+        e = min(t + DASH, length)
+        d.line((x0 + dx * t, y0 + dy * t, x0 + dx * e, y0 + dy * e), fill=MARK_INK, width=MARK_W)
+        t += DASH + GAP
+
+
 def _cut_marks(d: ImageDraw.ImageDraw, lay: Layout) -> None:
-    """Ticks at every card edge, running from just outside the card block out to the edge of the page (as far as the page goes; a printer clips what it cannot reach)."""
+    """Dashed guide lines at every card edge, from just outside the card block all the way to the edge of the page (a printer clips what it cannot reach)."""
     pw, ph = lay.page
     (ox, oy), (cw, ch), g = lay.origin, lay.card, lay.gap
     right, bottom = ox + lay.cols * cw + (lay.cols - 1) * g, oy + lay.rows * ch + (lay.rows - 1) * g
     xs = sorted({ox + i * (cw + g) + off for i in range(lay.cols) for off in (0, cw)})
     ys = sorted({oy + j * (ch + g) + off for j in range(lay.rows) for off in (0, ch)})
-    off, ink = _px(0.7), "#777"
+    off = _px(0.7)
     for x in xs:
         if oy - off > 4:
-            d.line((x, 0, x, oy - off), fill=ink, width=2)
+            _dashed(d, (x, oy - off), (x, 0))                              # drawn from the cards outward, so the dash nearest the card is whole
         if bottom + off < ph - 4:
-            d.line((x, bottom + off, x, ph), fill=ink, width=2)
+            _dashed(d, (x, bottom + off), (x, ph - 1))
     for y in ys:
         if ox - off > 4:
-            d.line((0, y, ox - off, y), fill=ink, width=2)
+            _dashed(d, (ox - off, y), (0, y))
         if right + off < pw - 4:
-            d.line((right + off, y, pw, y), fill=ink, width=2)
+            _dashed(d, (right + off, y), (pw - 1, y))
 
 
 def sheets(images: list[Path], paper: str = "letter", size: str = "mtg", margin_mm: float = 5.0, gap_mm: float = 0.0, turn: str = "auto", marks: bool = True) -> list[Image.Image]:
@@ -216,6 +231,7 @@ def duplex_pages(pairs: list[tuple[Path, Path | None]], paper: str = "letter", s
                 bp.paste(get(back, back_angle(lay, flip)), back_cell(lay, n, flip, dx, dy))
         if marks:
             _cut_marks(ImageDraw.Draw(fp), lay)
+            _cut_marks(ImageDraw.Draw(bp), lay)
         fronts.append(fp)
         backs.append(bp)
     return fronts, backs
