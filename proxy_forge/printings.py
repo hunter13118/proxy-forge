@@ -25,7 +25,9 @@ from .scryfall import API, HEADERS, SEPARATE_FACES, _norm
 
 log = logging.getLogger("printings")
 MAX_AGE_S = 7 * 86400
-SKIP_LAYOUTS = {"token", "double_faced_token", "emblem", "art_series", "vanguard", "scheme", "planar"}
+SKIP_LAYOUTS = {"art_series", "vanguard", "scheme", "planar"}      # tokens and emblems are kept (is_token), in their own name table
+TOKEN_LAYOUTS = {"token", "double_faced_token", "emblem"}
+SCHEMA_VERSION = "2"
 SCHEMA = """
 create table printings (
   id text primary key, oracle_id text not null, name_norm text not null,
@@ -33,13 +35,14 @@ create table printings (
   released_at text, lang text, illustration_id text, artist text, treatment text not null,
   border_color text, frame text, frame_effects text, promo_types text, finishes text,
   full_art int, textless int, digital int, oversized int, paper int,
-  image_status text, faces int, usd real, usd_foil real, usd_etched real, eur real, eur_foil real,
+  image_status text, faces int, is_token int default 0, usd real, usd_foil real, usd_etched real, eur real, eur_foil real,
   json text not null);
 create index p_oracle on printings(oracle_id);
 create index p_set_cn on printings(set_code, cn);
 create index p_art on printings(illustration_id, treatment);
 create table names (name_norm text, oracle_id text);
 create index n_name on names(name_norm);
+create table token_names (name_norm text, oracle_id text);
 create table sets (code text primary key, name text, set_type text, released_at text, parent text, card_count int, icon_uri text, icon_svg text, digital int);
 create table meta (k text primary key, v text);
 """
@@ -72,7 +75,7 @@ def row(card: dict) -> tuple:
             card.get("artist"), treatments.treatment(card), card.get("border_color"), card.get("frame"), json.dumps(card.get("frame_effects") or []),
             json.dumps(card.get("promo_types") or []), json.dumps(card.get("finishes") or []), int(bool(card.get("full_art"))), int(bool(card.get("textless"))),
             int(bool(card.get("digital"))), int(bool(card.get("oversized"))), int("paper" in (card.get("games") or [])), card.get("image_status"),
-            len(faces) if faces and card.get("layout") in SEPARATE_FACES else 1, _price(card, "usd"), _price(card, "usd_foil"), _price(card, "usd_etched"),
+            len(faces) if faces and card.get("layout") in SEPARATE_FACES else 1, int(card.get("layout") in TOKEN_LAYOUTS), _price(card, "usd"), _price(card, "usd_foil"), _price(card, "usd_etched"),
             _price(card, "eur"), _price(card, "eur_foil"), json.dumps(card, ensure_ascii=False, separators=(",", ":")))
 
 
@@ -117,7 +120,13 @@ class Printings:
         return c.get(url, headers=HEADERS, **kw)
 
     def ready(self) -> bool:
-        return self.path.exists() and self.age() is not None
+        """Built, and by this version of the code (an older file lacks the token tables: it is rebuilt)."""
+        try:
+            with self._db() as db:
+                r = db.execute("select v from meta where k='schema'").fetchone()
+        except sqlite3.Error:
+            return False
+        return bool(r) and r[0] == SCHEMA_VERSION and self.age() is not None
 
     def age(self) -> float | None:
         try:
@@ -152,24 +161,31 @@ class Printings:
         db = sqlite3.connect(new)
         try:
             db.executescript(SCHEMA)
-            kept, batch, names = 0, [], []
-            ins = "insert or replace into printings values (" + ",".join("?" * 29) + ")"
+            kept, batch, names, tnames = 0, [], [], []
+            ins = "insert or replace into printings values (" + ",".join("?" * 30) + ")"
             for card in _lines(source):
                 if card.get("layout") in SKIP_LAYOUTS or card.get("object") == "token" or not card.get("id"):
                     continue
                 batch.append(row(card))
                 oid = batch[-1][1]
+                is_tok = card.get("layout") in TOKEN_LAYOUTS
                 for n in {_norm(card.get("name", "")), *(_norm(f.get("name", "")) for f in card.get("card_faces") or [])} - {""}:
-                    names.append((n, oid))
+                    (tnames if is_tok else names).append((n, oid))
                 kept += 1
                 if len(batch) >= 5000:
                     db.executemany(ins, batch)
                     db.executemany("insert into names values (?, ?)", names)
+                    db.executemany("insert into token_names values (?, ?)", tnames)
                     db.commit()
-                    batch, names = [], []
+                    batch, names, tnames = [], [], []
                     progress(f"indexing printings ({kept})")
             db.executemany(ins, batch)
             db.executemany("insert into names values (?, ?)", names)
+            db.executemany("insert into token_names values (?, ?)", tnames)
+            db.execute("create table tu as select distinct name_norm, oracle_id from token_names")
+            db.execute("drop table token_names")
+            db.execute("alter table tu rename to token_names")
+            db.execute("create index tn_name on token_names(name_norm)")
             db.execute("create table nu as select distinct name_norm, oracle_id from names")                 # one row per (name, card)
             db.execute("drop table names")
             db.execute("alter table nu rename to names")
@@ -179,6 +195,7 @@ class Printings:
                              int(bool(s.get("digital")))) for s in sets])
             db.execute("insert into meta values ('built_at', ?)", (str(time.time()),))
             db.execute("insert into meta values ('count', ?)", (str(kept),))
+            db.execute("insert into meta values ('schema', ?)", (SCHEMA_VERSION,))
             db.commit()
         finally:
             db.close()
@@ -192,6 +209,50 @@ class Printings:
         db = sqlite3.connect(self.path)
         db.row_factory = sqlite3.Row
         return db
+
+    def tokens_named(self, name: str) -> list[dict]:
+        """Every printing of every token called `name` (a face name works), newest first. Several different tokens share a name (Insect, Soldier ...): they differ in oracle id."""
+        with self._db() as db:
+            q = "select * from printings where is_token=1 and oracle_id in (select oracle_id from token_names where name_norm=?) order by released_at desc, set_code, cn_num"
+            return [dict(r) for r in db.execute(q, (_norm(name),))]
+
+    def token_card(self, name: str, set_code: str = "", number: str = "", prefer_sets: list[str] | None = None) -> dict | None:
+        """The Scryfall card (as a dict) a deck-list token line means. A stated set and number win; then the sets in `prefer_sets`; then the commonest token of that name (the one with the
+        most printings), in its newest good scan. None when no token has that name."""
+        if set_code and number:
+            p = self.by_set_cn(set_code, number)
+            if p and p["is_token"]:
+                return json.loads(p["json"])
+        cands = self.tokens_named(name)
+        if not cands:
+            return None
+        if set_code:
+            inset = [p for p in cands if p["set_code"] == set_code.lower()]
+            cands = inset or cands
+        elif prefer_sets:
+            fam = self.family([c.lower() for c in prefer_sets])
+            inset = [p for p in cands if p["set_code"] in fam]
+            cands = inset or cands
+        by_oracle: dict[str, list[dict]] = {}
+        for p in cands:
+            by_oracle.setdefault(p["oracle_id"], []).append(p)
+        best = max(by_oracle.values(), key=len)
+        rank = {"highres_scan": 3, "lowres": 2, "placeholder": 0, "missing": 0}
+        best.sort(key=lambda p: (rank.get(p["image_status"], 0), p["released_at"] or ""), reverse=True)
+        return json.loads(best[0]["json"])
+
+    def token_variants(self, name: str) -> list[dict]:
+        """Like `variants`, over every token called `name` (they are different tokens, one per oracle id), grouped by illustration and look."""
+        rank = {"highres_scan": 3, "lowres": 2, "placeholder": 1, "missing": 0}
+        groups: dict[tuple, list[dict]] = {}
+        for p in self.tokens_named(name):
+            groups.setdefault((p["illustration_id"] or p["id"], p["treatment"], p["oracle_id"]), []).append(p)
+        out = []
+        for (ill, t, oid), ps in groups.items():
+            ps.sort(key=lambda p: (rank.get(p["image_status"], 0), p["released_at"] or ""), reverse=True)
+            out.append({"illustration_id": ill, "treatment": t, "oracle_id": oid, "best": ps[0], "printings": ps})
+        out.sort(key=lambda v: v["best"]["released_at"] or "", reverse=True)
+        return out
 
     def count(self) -> int:
         with self._db() as db:

@@ -96,7 +96,8 @@ def test_treatment_keys():
 
 def test_build_skips_tokens_swaps_atomically_and_keeps_sets(tmp_path):
     p = built(tmp_path)
-    assert p.count() == len(fixture()) - 1                                  # the token is not indexed
+    assert p.count() == len(fixture())                                      # tokens are indexed too (in their own name table)
+    assert p.oracle_ids(["Treasure"])["Treasure"] is None and p.tokens_named("Treasure")      # ... so a token is never mistaken for a card
     assert not list(tmp_path.glob("*.part")) and not list(tmp_path.glob("*.new"))
     assert p.age() < 5 and not p.stale()
     assert {s["code"] for s in p.sets()} == {"mh3", "pmh3", "mh2", "ltr", "cmm", "isd"}      # digital sets are not offered

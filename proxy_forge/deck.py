@@ -43,6 +43,8 @@ def parse(text: str) -> list[Entry]:
         sec = "sideboard" if m.group("sb") else section
         if tag and tag.group(1).lower().startswith("commander"):
             sec = "commander"
+        elif tag and tag.group(1).lower().startswith("token"):
+            sec = "tokens"
         elif tag and tag.group(1).lower().startswith(("sideboard", "maybeboard")):
             sec = "sideboard" if tag.group(1).lower().startswith("side") else "maybe"
         qty = int(m.group("qty") or 1)

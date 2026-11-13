@@ -24,7 +24,7 @@ from .scryfall import Scryfall, units as card_units
 from .studio import Cancelled, Studio
 
 log = logging.getLogger("engine")
-SKIP_SECTIONS = {"maybe", "tokens"}
+SKIP_SECTIONS = {"maybe"}
 
 
 class Job:
@@ -124,7 +124,11 @@ class Engine:
             if job.cancel:
                 raise Cancelled()
             job.done, job.msg = i, f"looking up {e.name}"
-            card = self.scry.lookup(e.name)
+            card = self._token_card(deck, e) if e.section == "tokens" else self.scry.lookup(e.name)
+            is_tok = e.section == "tokens"
+            if card is None and not is_tok:                                              # not a card: maybe a token listed without a Tokens heading
+                card = self._token_card(deck, e)
+                is_tok = card is not None
             if card is None:
                 missing.append(e.name)
                 out_entries.append({"qty": e.qty, "name": e.name, "section": e.section, "found": False, "keys": []})
@@ -145,7 +149,7 @@ class Engine:
                         units[k]["pin"] = units[k]["pin"] or {"set": pin["set"], "number": pin["number"]}
                     continue
                 seed = int(hashlib.sha1((did + k).encode()).hexdigest()[:8], 16)
-                units[k] = {**u, "copies": e.qty, "prompt": "", "seed": seed, "subjects": [], "art": "", "art_shape": "", "status": "new", "error": "", "pin": ({"set": e.set, "number": e.number} if e.set else None), "pins": [pin] if pin else []}
+                units[k] = {**u, "is_token": is_tok, "copies": e.qty, "prompt": "", "seed": seed, "subjects": [], "art": "", "art_shape": "", "status": "new", "error": "", "pin": ({"set": e.set, "number": e.number} if e.set else None), "pins": [pin] if pin else []}
                 order.append(k)
             out_entries.append({"qty": e.qty, "name": card.get("name", e.name), "section": e.section, "found": True, "keys": keys})
 
@@ -156,6 +160,16 @@ class Engine:
         job.msg = f"{len(units)} cards" + (f", {len(missing)} not found" if missing else "")
         if resolver.policy_of(store.get_deck(did))["source"] != "forge":
             self.apply_policy(did)                                              # the official art is fetched on the network worker, not behind a drawing
+
+    def _token_card(self, deck: dict, e) -> dict | None:
+        """The token a deck-list line means (None when the printings index has no token of that name). Builds the index if it is not there yet."""
+        try:
+            self.ensure_index()
+        except Exception as ex:
+            log.warning("printings index unavailable for tokens: %s", ex)
+            return None
+        chain = (deck.get("art_policy") or {}).get("sets") or []
+        return self.prt.token_card(e.name, e.set, e.number, chain)
 
     # ------------------------------------------------------------------------------------------------------------------------------------------------ references
     def describe_subject(self, pid: str, sid: str) -> Job:
@@ -362,6 +376,11 @@ class Engine:
                 scans.fetch(p, int(u.get("face", 0)), "png", self.scan_transport)
                 if resolver.policy_of(deck)["print"] == "template":
                     scans.fetch(p, int(u.get("face", 0)), "art_crop", self.scan_transport)
+                if u.get("is_token") and p["oracle_id"] != u.get("oracle_id"):               # a different token of the same name: the card's own text follows it
+                    fresh = card_units(json.loads(p["json"]))
+                    side = fresh[min(int(u.get("face", 0)), len(fresh) - 1)]
+                    keep = {k: u[k] for k in ("key", "copies", "prompt", "seed", "subjects", "art", "art_shape", "status", "error", "pin", "pins", "is_token", "locked") if k in u}
+                    store.update_deck(did, lambda d: d["units"][key].update({**side, **keep}))
                 src = u.get("art_source", "forge")
                 src = src if src != "forge" else (resolver.policy_of(deck)["source"] if resolver.policy_of(deck)["source"] != "forge" else "archive")
                 store.update_deck(did, lambda d: d["units"][key].update(art_source=src, printing=pb, locked=True, note=""))

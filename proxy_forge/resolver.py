@@ -63,6 +63,9 @@ def oracle_of(pr: Printings, unit: dict) -> str | None:
     oid = unit.get("oracle_id")
     if oid and pr.for_oracle(oid):
         return oid
+    if unit.get("is_token"):
+        t = pr.tokens_named(unit.get("name", ""))
+        return t[0]["oracle_id"] if t else None
     return pr.oracle_ids([unit.get("name", "")]).get(unit.get("name", ""))
 
 
@@ -76,9 +79,17 @@ def _days(a: str | None, b: str | None) -> int:
 ODD_SETS = {"promo", "box", "memorabilia", "funny", "token", "minigame", "spellbook", "vanguard", "treasure_chest", "alchemy", "arsenal", "masterpiece"}
 
 
-def _nearest(pr: Printings, oid: str, anchor_set: str, pref: str) -> tuple[dict | None, str]:
+def pool(pr: Printings, unit: dict, oid: str) -> list[dict]:
+    """Every printing a card may take. A token: its own printings, else any token of the same name (the same token is often a different oracle card in each set)."""
+    own = pr.for_oracle(oid)
+    if unit.get("is_token"):
+        return own + [p for p in pr.tokens_named(unit.get("name", "")) if p["oracle_id"] != oid]
+    return own
+
+
+def _nearest(pr: Printings, allp: list[dict], anchor_set: str, pref: str) -> tuple[dict | None, str]:
     """The set closest in time to the anchor set (by the sets' release dates; Secret Lair, promos and the like only when nothing ordinary has the card)."""
-    allp = [p for p in pr.for_oracle(oid) if usable(p)]
+    allp = [p for p in allp if usable(p)]
     if not allp:
         return None, ""
     info = {s["code"]: s for s in pr.sets()}
@@ -92,9 +103,9 @@ def _nearest(pr: Printings, oid: str, anchor_set: str, pref: str) -> tuple[dict 
     return p, f"nearest to {anchor_set.upper()}"
 
 
-def _default(pr: Printings, oid: str) -> dict | None:
+def _default(allp: list[dict]) -> dict | None:
     """Scryfall's own default printing is not in the bulk file; this is the newest regular, best-scanned paper printing."""
-    allp = [p for p in pr.for_oracle(oid) if usable(p)]
+    allp = [p for p in allp if usable(p)]
     reg = [p for p in allp if p["treatment"].startswith("regular")] or allp
     return sorted(reg, key=lambda p: (-STATUS_RANK.get(p["image_status"], 0), _neg(p["released_at"])))[0] if reg else None
 
@@ -111,16 +122,19 @@ def resolve_unit(pr: Printings, unit: dict, policy: dict) -> dict:
     chain = [c.lower() for c in policy.get("sets", [])]
     pref = policy.get("treatment", "regular")
     pin = unit.get("pin") or {}
+    tok = bool(unit.get("is_token"))
+    allp = pool(pr, unit, oid)
     pin_missing = False
     if policy.get("pins", True) and pin.get("set"):
         p = pr.by_set_cn(pin["set"], pin.get("number", "")) if pin.get("number") else None
         if p is None and pin.get("set"):                                           # a set without a number: the best printing in that set
-            p = pick_in_set(pr.in_sets(oid, [pin["set"]], family=False), pref)
-        if p and p["oracle_id"] == oid and usable(p):
+            p = pick_in_set([x for x in allp if x["set_code"] == pin["set"].lower()], pref)
+        if p and (p["oracle_id"] == oid or (tok and p["is_token"] and p["name_norm"] == unit.get("name", "").lower())) and usable(p):
             return {"printing": p, "why": f"pinned {pin['set'].upper()} {pin.get('number', '')}".strip(), "fallback": False, "pin_missing": False}
         pin_missing = True
     for code in (pr.family(chain) if policy.get("family", True) else chain):
-        p = pick_in_set([x for x in pr.in_sets(oid, [code], family=False)], pref)
+        mine = [x for x in allp if x["set_code"] == code]
+        p = pick_in_set([x for x in mine if x["oracle_id"] == oid] or mine, pref)
         if p:
             return {"printing": p, "why": f"chain:{code}", "fallback": False, "pin_missing": pin_missing}
     mode = policy.get("fallback", "nearest")
@@ -130,9 +144,9 @@ def resolve_unit(pr: Printings, unit: dict, policy: dict) -> dict:
     if mode == "blank":
         return {"blank": True, "why": f"not printed in {where}", "fallback": True, "pin_missing": pin_missing}
     if mode == "default":
-        p, how = _default(pr, oid), "default printing"
+        p, how = _default(allp), "default printing"
     else:
-        p, how = _nearest(pr, oid, chain[0], pref) if chain else (_default(pr, oid), "default printing")
+        p, how = _nearest(pr, allp, chain[0], pref) if chain else (_default(allp), "default printing")
     if p is None:
         return {"forge": True, "why": f"not printed in {where}, and no usable scan; AI art", "fallback": True, "pin_missing": pin_missing}
     return {"printing": p, "why": f"not printed in {where}; used {p['set_code'].upper()} ({how}, {p['released_at']})", "fallback": True, "pin_missing": pin_missing}

@@ -1,7 +1,7 @@
 // II. Three doors: Forge (AI art), Archive (the Atlas of sets), Vault (priciest). The Atlas shows every set with a coverage ring: how many of the deck's cards it holds.
 import { $, S, h, api, pic, fail, follow, emit, on, policyOf, remember, recall, toast } from "./core.js";
 
-const TYPES = [["", "All"], ["expansion", "Expansions"], ["core", "Core"], ["masters", "Masters"], ["commander", "Commander"], ["draft_innovation", "Horizons"], ["promo", "Promos"], ["box", "Secret Lair"]];
+const TYPES = [["", "All"], ["expansion", "Expansions"], ["core", "Core"], ["masters", "Masters"], ["commander", "Commander"], ["draft_innovation", "Horizons"], ["promo", "Promos"], ["box", "Secret Lair"], ["token", "Tokens"]];
 let chain = [];
 let q = "", type = "", year = 0, shown = 60;
 let door = recall("door") || "forge";

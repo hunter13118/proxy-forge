@@ -557,6 +557,12 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
         pol = resolver.policy_of(d)
         cur = (u.get("printing") or {}).get("id")
         out = []
+        if u.get("is_token"):                                                  # every token of this name, in every set: they are different cards, and cost nothing
+            for v in pr.token_variants(u["name"]):
+                out.append({"treatment": v["treatment"], "illustration_id": v["illustration_id"], "amount": None, "finish": None, "current": any(p["id"] == cur for p in v["printings"]),
+                            "best": v["best"]["id"], "printings": [{"id": p["id"], "set": p["set_code"], "cn": p["cn"], "released": p["released_at"], "status": p["image_status"],
+                                                                    "current": p["id"] == cur} for p in v["printings"]]})
+            return {"currency": pol["vault"]["currency"], "variants": out}
         for v in vault.appraise(pr, oid, {**pol, "source": "vault"}):
             ps = [p for p in pr.variants(oid) if p["treatment"] == v["treatment"] and p["illustration_id"] == v["illustration_id"]]
             allp = ps[0]["printings"] if ps else [v["printing"]]

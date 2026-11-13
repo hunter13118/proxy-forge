@@ -389,3 +389,93 @@ def test_a_stated_set_wins_for_vault_too_and_the_source_decides_the_rest(pr):
     assert off[stated["key"]]["printing"]["why"].startswith("priciest")
     only_pins = resolve_deck(pr, deck, pol(sets=[]))["units"]                                         # archive with no chain: stated sets, default printing for the rest
     assert only_pins[stated["key"]]["printing"]["set"] == "cmm" and only_pins[free["key"]]["printing"]
+
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------------------- tokens
+def token_cards():
+    cs = cards()
+    def tok(name, set_, cn, oid, pt, released, **kw):
+        c = tp.card(name, set_, cn, oid=oid, released=released, layout="token", type_line=f"Token Creature — {name}", power=pt[0], toughness=pt[1], **kw)
+        c["image_uris"] = {k: f"https://cards.scryfall.io/{k}/{c['id']}.{'png' if k == 'png' else 'jpg'}" for k in ("png", "normal", "art_crop")}
+        return c
+    cs += [tok("Insect", "t40k", "5", "tok-insect-a", ("1", "1"), "2022-10-07", ill="ins-a"),
+           tok("Insect", "tc16", "9", "tok-insect-b", ("0", "1"), "2016-11-11", ill="ins-b"),
+           tok("Insect", "tmm3", "3", "tok-insect-b", ("0", "1"), "2024-02-01", ill="ins-c"),
+           tok("Insect", "tdsk", "2", "tok-insect-b", ("0", "1"), "2024-09-27", ill="ins-d"),
+           tok("Necron Warrior", "t40k", "11", "tok-necron", ("2", "2"), "2022-10-07", ill="nec"),
+           tok("Necron Warrior", "t40k", "12", "tok-necron", ("2", "2"), "2022-10-07", ill="nec2")]
+    return cs
+
+
+@pytest.fixture
+def tpr(tmp_path):
+    p = printings.Printings(tmp_path / "t.sqlite", transport=tp.transport(token_cards()))
+    p.build()
+    return p
+
+
+def test_token_lookup_by_name_set_and_number(tpr):
+    assert tpr.token_card("Necron Warrior")["set"] == "t40k"
+    assert tpr.token_card("necron  warrior")["name"] == "Necron Warrior"
+    assert tpr.token_card("Nope") is None
+    assert tpr.token_card("Insect", "t40k", "5")["power"] == "1"                               # a stated set and number win
+    assert tpr.token_card("Insect", "t40k")["power"] == "1"                                    # a stated set alone
+    assert tpr.token_card("Insect", prefer_sets=["t40k"])["power"] == "1"                      # the deck's chain
+    assert tpr.token_card("Insect")["power"] == "0"                                            # otherwise the commonest Insect (three printings of the 0/1)
+    assert tpr.token_card("Sol Ring") is None                                                  # a real card is not a token
+
+
+def test_tokens_are_found_in_the_deck_list_with_or_without_a_heading():
+    from proxy_forge import deck
+    es = {e.name: e for e in deck.parse("1 Sol Ring\nTokens\n3 Insect (t40k) 5\n2 Necron Warrior\n")}
+    assert es["Insect"].section == "tokens" and es["Insect"].set == "t40k" and es["Necron Warrior"].section == "tokens" and es["Sol Ring"].section == "main"
+    assert deck.parse("1x Insect (t40k) 5 [Token]")[0].section == "tokens"
+
+
+def test_import_resolves_tokens_and_hangs_them_from_the_chosen_set(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA", tmp_path / "data")
+    p = printings.Printings(tmp_path / "t.sqlite", transport=tp.transport(token_cards()))
+    p.build()
+
+    class NoCards:
+        def refresh_bulk(self, *a, **k): return 0
+        def lookup(self, name): return None
+        def count(self): return 0
+        def age(self): return None
+    eng = Engine(scry=NoCards(), start=False, printings=p, scan_transport=img_transport())
+    d = store.new_deck("t", "", "classic", False)
+    eng._import(Job("import", d["id"]), d["id"], "Tokens\n3 Insect (t40k) 5\n2 Necron Warrior\n1 Insect\n1 Not A Thing\n")
+    deck = store.get_deck(d["id"])
+    names = [(deck["units"][k]["name"], deck["units"][k]["copies"], deck["units"][k]["is_token"]) for k in deck["order"]]
+    assert ("Necron Warrior", 2, True) in names and deck["missing"] == ["Not A Thing"]
+    ins = [deck["units"][k] for k in deck["order"] if deck["units"][k]["name"] == "Insect"]
+    assert {u["oracle_id"] for u in ins} == {"tok-insect-a", "tok-insect-b"} and "Token" in ins[0]["type_line"]         # two different tokens named Insect
+    eng._apply(Job("art", d["id"], "net"), d["id"], pol(sets=["t40k"], vary_basics=False))
+    deck = store.get_deck(d["id"])
+    by = {k: deck["units"][k] for k in deck["order"]}
+    a = next(u for u in by.values() if u["oracle_id"] == "tok-insect-a")
+    assert a["printing"]["set"] == "t40k" and a["printing"]["cn"] == "5" and a["printing"]["why"].startswith("pinned")
+    b = next(u for u in by.values() if u["oracle_id"] == "tok-insect-b")
+    assert b["printing"]["set"] == "t40k" and b["printing"]["fallback"] is False and b["printing"]["cn"] == "5"           # the chain finds an Insect in T40K by name, even of another oracle card
+    assert Image.open(eng.ensure_card(d["id"], a["key"])).size == (750, 1050)
+
+
+def test_token_loupe_lists_every_token_of_the_name_and_hanging_another_changes_its_text(tpr, tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from proxy_forge.app import create_app
+    monkeypatch.setattr(config, "DATA", tmp_path / "d2")
+    eng = Engine(start=False, printings=tpr, scan_transport=img_transport())
+    t = tpr.token_card("Insect", "t40k", "5")
+    from proxy_forge.scryfall import units as card_units
+    u = {**card_units(t)[0], "copies": 1, "pin": None, "pins": [], "is_token": True, "prompt": "", "seed": 1, "subjects": [], "art": "", "art_shape": "", "status": "new", "error": ""}
+    did = make_deck(eng, u)
+    eng._apply(Job("art", did, "net"), did, pol(sets=["t40k"], vary_basics=False))
+    c = TestClient(create_app(eng))
+    v = c.get(f"/api/decks/{did}/units/{u['key']}/printings").json()["variants"]
+    assert {x["printings"][0]["set"] for x in v} == {"t40k", "tc16", "tmm3", "tdsk"} and all(x["amount"] is None for x in v)
+    other = next(x for x in v if x["printings"][0]["set"] == "tc16")["best"]
+    eng.set_printing(did, u["key"], other)
+    eng._qs["net"].get()[1](Job("pin", did, "net"))
+    u2 = store.get_deck(did)["units"][u["key"]]
+    assert u2["printing"]["set"] == "tc16" and u2["power"] == "0" and u2["oracle_id"] == "tok-insect-b" and u2["locked"] and u2["key"] == u["key"]
