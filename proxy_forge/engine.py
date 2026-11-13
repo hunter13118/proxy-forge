@@ -423,7 +423,8 @@ class Engine:
             profile = store.get_profile(deck["profile"]) if deck.get("profile") else None
             profile = profile or {"direction": "", "subjects": [], "lora": "", "lora_strength": 0.8}
             scene = (prompt if prompt is not None else cfg["prompt"]).strip() or "ornate trading card back design, symmetrical, intricate decorative border, a glowing emblem in the centre, no text"
-            text = prompts.compose(scene, subjects=[], direction=profile.get("direction", ""), shape="portrait")
+            text = prompts.compose({"scene": scene, "tags": ["no humans", "symmetry", "ornate border", "card back", "decorative", "centered composition", "intricate pattern"]},
+                                   subjects=[], direction=profile.get("direction", ""), shape="portrait", no_humans=True)
             job.total, job.msg = 1, "drawing the back"
             why = self.studio.reachable()
             if why:

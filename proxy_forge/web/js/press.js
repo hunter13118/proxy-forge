@@ -56,9 +56,10 @@ export function renderPress() {
   $("sheet-cap").textContent = !list.length ? "" : side === "front" ? "The first sheet, to scale. Dashed lines are cuts."
     : `The back of the first sheet, as it prints (${o.flip === "long" ? "columns" : "rows"} mirrored so each back lands behind its front).` + (hasBacks ? "" : " No back chosen yet: pick one in the Source step.");
   const sheets = Math.ceil(list.length / 9);
-  $("press-count").replaceChildren(list.length ? `${sheets} ${o.mode === "none" ? "sheets" : `sheets, ${sheets * 2} pages`} · ${list.length} cards` : "No cards yet",
-    fb || ai ? h("small", {}, [fb ? `${fb} still amber (not in the chosen sets)` : "", ai ? `${ai} drawn with AI` : ""].filter(Boolean).join(" · ")) : null,
-    duplexOn() && !hasBacks ? h("small", {}, "Two-sided is on but this deck has no back yet: choose one under Source → Card backs.") : null);
+  const notes = [];
+  if (fb || ai) notes.push(h("small", {}, [fb ? `${fb} still amber (not in the chosen sets)` : "", ai ? `${ai} drawn with AI` : ""].filter(Boolean).join(" · ")));
+  if (duplexOn() && !hasBacks) notes.push(h("small", {}, "Two-sided is on but this deck has no back yet: choose one under Source → Card backs."));
+  $("press-count").replaceChildren(list.length ? `${sheets} ${o.mode === "none" ? "sheets" : `sheets, ${sheets * 2} pages`} · ${list.length} cards` : "No cards yet", ...notes);
 }
 
 export function wirePress() {

@@ -86,3 +86,9 @@ Besides the AI art ("Forge"), a deck can take its pictures from Scryfall's offic
 - Import: paste text, an Archidekt link, or drop a `.txt` / `.dek` / `.csv` file.
 
 Data: `G:\proxy-forge-data\scryfall\printings.sqlite` (every printing, ~110k, built from Scryfall's `default_cards` in about 20 s; the Source step offers to build it), `scans\` (every official image, kept). Code: `printings.py`, `treatments.py`, `resolver.py`, `vault.py`, `scans.py`, `importers.py`. Network work (index, scans) runs on its own worker, so it never waits behind a LoRA training. Prices are from the index only (Scryfall); MTGJSON and JustTCG as second opinions are not built.
+
+## Card backs and two-sided printing
+
+Source step, "Card backs": none, **Magic's official back** (fetched from Scryfall once), six **funny backs** drawn locally (a swirl, a monster ball, an eye, an inkwell, a rubber duck, a tax form), **your own picture** (cropped to the card), or a back **drawn by the AI** in the deck's style. A double-faced card can print its other side as its back (the second face is then not a separate card).
+
+Press step, "Two-sided printing": **auto-duplex** (PDF pages front, back, front, back: the printer pulls each sheet back in, e.g. Epson ET-2980; set the same flip edge in the print dialog) or **all fronts then all backs** (re-feed the stack; optional two separate PDFs, optional reversed back order). Each back is placed in the front slot mirrored across the flip axis and turned so the top edges meet (`export.back_cell`, `back_angle`; tests flip the page like the paper and compare pixels, upright and turned, long edge and short edge). "Shift backs" nudges the backs in 0.1 mm steps; **Alignment test sheet** prints numbered, crossed slots on both sides to check a printer before a real run; "How to load my printer" explains the feeding. Printer behaviour differs: the test sheet, not the file, is the judge.
