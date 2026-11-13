@@ -526,7 +526,7 @@ def _has_pt(unit: dict) -> bool:
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------- the card
 
-def render(unit: dict, art: Image.Image | None, tpl: dict, *, scale: float = 1.0, footer: bool = True) -> Image.Image:
+def render(unit: dict, art: Image.Image | None, tpl: dict, *, scale: float = 1.0, footer: bool = True, footer_text: str | None = None) -> Image.Image:
     """The finished card as an RGB picture, 750x1050 times `scale`."""
     th = theme_for(unit)
     img = Image.new("RGB", (W, H), "#0b0b0b")
@@ -563,7 +563,7 @@ def render(unit: dict, art: Image.Image | None, tpl: dict, *, scale: float = 1.0
 
     if footer:
         fx, fy = tpl.get("footer_xy", [W / 2, H - 16])
-        d.text((fx, fy), FOOTER, font=font(tpl, "body", 15), fill=tpl.get("footer_ink", "#bdbdbd"), anchor="mm")
+        d.text((fx, fy), footer_text or FOOTER, font=font(tpl, "body", 15), fill=tpl.get("footer_ink", "#bdbdbd"), anchor="mm")
     if scale != 1.0:
         img = img.resize((int(W * scale), int(H * scale)), Image.LANCZOS)
     return img

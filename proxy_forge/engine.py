@@ -18,7 +18,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import config, deck as decklist, export, lora_train, prompts, references, render, store
+from . import config, deck as decklist, export, lora_train, prompts, references, render, resolver, scans, store
+from .printings import Printings
 from .scryfall import Scryfall, units as card_units
 from .studio import Cancelled, Studio
 
@@ -27,16 +28,16 @@ SKIP_SECTIONS = {"maybe", "tokens"}
 
 
 class Job:
-    def __init__(self, kind: str, deck: str | None):
+    def __init__(self, kind: str, deck: str | None, queue: str = "gpu"):
         self.id = uuid.uuid4().hex[:10]
-        self.kind, self.deck = kind, deck
+        self.kind, self.deck, self.queue = kind, deck, queue
         self.state = "queued"                           # queued | running | done | error | cancelled
         self.done, self.total, self.msg, self.error = 0, 0, "queued", ""
         self.cancel = False
         self.created = time.time()
 
     def public(self) -> dict:
-        return {"id": self.id, "kind": self.kind, "deck": self.deck, "state": self.state, "done": self.done, "total": self.total, "message": self.msg, "error": self.error}
+        return {"id": self.id, "kind": self.kind, "queue": self.queue, "deck": self.deck, "state": self.state, "done": self.done, "total": self.total, "message": self.msg, "error": self.error}
 
 
 def art_dir() -> Path:
@@ -64,27 +65,30 @@ def card_thumb(did: str, key: str) -> Path:
 
 
 class Engine:
-    def __init__(self, scry: Scryfall | None = None, studio: Studio | None = None, start: bool = True):
+    def __init__(self, scry: Scryfall | None = None, studio: Studio | None = None, start: bool = True, printings: Printings | None = None, scan_transport=None):
         self.scry = scry or Scryfall()
+        self.prt = printings or Printings()
+        self.scan_transport = scan_transport
         self.studio = studio or Studio()
         self.jobs: dict[str, Job] = {}
-        self._q: queue.Queue = queue.Queue()
+        self._qs: dict[str, queue.Queue] = {"gpu": queue.Queue(), "net": queue.Queue()}       # "net": Scryfall and image downloads, which never wait behind a LoRA training
         if start:
-            threading.Thread(target=self._worker, daemon=True, name="proxy-forge-worker").start()
+            for name in self._qs:
+                threading.Thread(target=self._worker, args=(name,), daemon=True, name=f"proxy-forge-{name}").start()
 
     # ------------------------------------------------------------------------------------------------------------------------------------------------- the queue
-    def submit(self, kind: str, deck: str | None, fn) -> Job:
-        job = Job(kind, deck)
+    def submit(self, kind: str, deck: str | None, fn, queue: str = "gpu") -> Job:
+        job = Job(kind, deck, queue)
         self.jobs[job.id] = job
         for old in sorted(self.jobs.values(), key=lambda j: j.created)[:-60]:
             if old.state in ("done", "error", "cancelled"):
                 self.jobs.pop(old.id, None)
-        self._q.put((job, fn))
+        self._qs[queue].put((job, fn))
         return job
 
-    def _worker(self) -> None:
+    def _worker(self, name: str = "gpu") -> None:
         while True:
-            job, fn = self._q.get()
+            job, fn = self._qs[name].get()
             if job.cancel:
                 job.state, job.msg = "cancelled", "cancelled"
                 continue
@@ -133,7 +137,7 @@ class Engine:
                     units[k]["copies"] += e.qty
                     continue
                 seed = int(hashlib.sha1((did + k).encode()).hexdigest()[:8], 16)
-                units[k] = {**u, "copies": e.qty, "prompt": "", "seed": seed, "subjects": [], "art": "", "art_shape": "", "status": "new", "error": ""}
+                units[k] = {**u, "copies": e.qty, "prompt": "", "seed": seed, "subjects": [], "art": "", "art_shape": "", "status": "new", "error": "", "pin": ({"set": e.set, "number": e.number} if e.set else None)}
                 order.append(k)
             out_entries.append({"qty": e.qty, "name": card.get("name", e.name), "section": e.section, "found": True, "keys": keys})
 
@@ -142,6 +146,8 @@ class Engine:
         store.update_deck(did, apply)
         job.done = job.total
         job.msg = f"{len(units)} cards" + (f", {len(missing)} not found" if missing else "")
+        if resolver.policy_of(store.get_deck(did))["source"] != "forge":
+            self.apply_policy(did)                                              # the official art is fetched on the network worker, not behind a drawing
 
     # ------------------------------------------------------------------------------------------------------------------------------------------------ references
     def describe_subject(self, pid: str, sid: str) -> Job:
@@ -215,9 +221,9 @@ class Engine:
         tpl = render.get_template(deck["template"])
         shape = render.art_shape(tpl)
         width, height = config.SIZES[shape]
-        targets = [k for k in deck["order"] if keys is None or k in keys]
+        targets = [k for k in deck["order"] if (keys is None or k in keys) and deck["units"][k].get("art_source", "forge") == "forge"]
         if not targets:
-            raise RuntimeError("nothing to draw")
+            raise RuntimeError("nothing to draw: every card uses official art (switch a card to AI art in its Loupe, or change the deck's source)")
 
         # phase 1: the prompts
         need = [k for k in targets if rewrite or not deck["units"][k].get("prompt")]
@@ -284,19 +290,109 @@ class Engine:
             tmp.replace(path)
         return name
 
+    # ------------------------------------------------------------------------------------------------------------------------------------------- official art (Archive)
+    def ensure_index(self, progress=lambda m: None, max_age: float | None = None) -> None:
+        """Build the printings index when there is none (or, for prices, when it is over a day old)."""
+        if not self.prt.ready() or (max_age is not None and self.prt.stale(max_age)):
+            self.prt.build(progress)
+
+    def apply_policy(self, did: str, policy: dict | None = None) -> Job:
+        """Save the art policy (when given) and resolve every card to a printing, fetch the scans and redraw the cards. Runs on the network worker."""
+        return self.submit("art", did, lambda job: self._apply(job, did, policy), queue="net")
+
+    def _apply(self, job: Job, did: str, policy: dict | None) -> None:
+        if policy is not None:
+            store.update_deck(did, lambda d: d.update(art_policy=policy))
+        pol = resolver.policy_of(store.get_deck(did))
+        if pol["source"] != "forge":
+            job.msg = "checking the printings index"
+            self.ensure_index(lambda m: setattr(job, "msg", m), 86400 if pol["source"] in ("vault", "budget") else None)
+        changes = resolve_deck(self.prt, store.get_deck(did), pol) if pol["source"] == "forge" or self.prt.ready() else None
+        store.update_deck(did, lambda d: d.update(units=changes["units"], order=changes["order"]))
+        deck = store.get_deck(did)
+        want = []
+        for k in deck["order"]:
+            u = deck["units"][k]
+            if u.get("art_source", "forge") != "forge" and u.get("printing"):
+                full = self._printing_row(u["printing"]["id"])
+                want.append((full, int(u.get("face", 0)), "png"))
+                if pol["print"] == "template":
+                    want.append((full, int(u.get("face", 0)), "art_crop"))
+        want = list({(w[0]["id"], w[1], w[2]): w for w in want}.values())
+        job.total, job.done = len(want) + len(deck["order"]), 0
+        job.msg = f"fetching {len(want)} card images"
+        errors = scans.fetch_many(want, lambda d, t: setattr(job, "done", d), transport=self.scan_transport)
+        for n, k in enumerate(deck["order"]):
+            if job.cancel:
+                raise Cancelled()
+            job.done, job.msg = len(want) + n, f"drawing {deck['units'][k]['name']}"
+            self.render_unit(did, k)
+        n_fb = sum(1 for k in deck["order"] if (deck["units"][k].get("printing") or {}).get("fallback"))
+        job.done = job.total
+        job.msg = f"{len(deck['order'])} cards" + (f", {n_fb} not in the chosen sets" if n_fb else "") + (f", {len(errors)} images failed" if errors else "")
+        if errors:
+            log.warning("scan errors: %s", errors[:5])
+
+    def _printing_row(self, pid: str) -> dict:
+        with self.prt._db() as db:
+            row = db.execute("select * from printings where id=?", (pid,)).fetchone()
+        if row is None:
+            raise RuntimeError("no such printing")
+        return dict(row)
+
+    def set_printing(self, did: str, key: str, printing_id: str | None) -> Job:
+        """Hang one card on a printing chosen by hand (or on AI art when `printing_id` is None). Re-resolving the deck leaves it alone."""
+        def run(job: Job):
+            deck = store.get_deck(did)
+            u = deck["units"][key]
+            if printing_id is None:
+                store.update_deck(did, lambda d: d["units"][key].update(art_source="forge", printing=None, locked=True, note="AI art, chosen by hand"))
+            else:
+                p = self._printing_row(printing_id)
+                pb = {**resolver.brief(p), "why": "chosen by hand", "fallback": False}
+                job.msg = "fetching the image"
+                scans.fetch(p, int(u.get("face", 0)), "png", self.scan_transport)
+                if resolver.policy_of(deck)["print"] == "template":
+                    scans.fetch(p, int(u.get("face", 0)), "art_crop", self.scan_transport)
+                src = u.get("art_source", "forge")
+                src = src if src != "forge" else (resolver.policy_of(deck)["source"] if resolver.policy_of(deck)["source"] != "forge" else "archive")
+                store.update_deck(did, lambda d: d["units"][key].update(art_source=src, printing=pb, locked=True, note=""))
+            self.render_unit(did, key)
+            job.done = job.total = 1
+            job.msg = "hung"
+        return self.submit("pin", did, run, queue="net")
+
     # --------------------------------------------------------------------------------------------------------------------------------------------------- rendering
     def render_unit(self, did: str, key: str) -> None:
         deck = store.get_deck(did)
         u = deck["units"][key]
         tpl = render.get_template(deck["template"])
-        art = None
-        if u.get("art") and art_path(u["art"]).exists():
-            with Image.open(art_path(u["art"])) as im:
-                art = im.convert("RGB")
-        card = render.render(u, art, tpl)
+        card = self._official_card(deck, u, tpl)
+        if card is None:
+            art = None
+            if u.get("art") and art_path(u["art"]).exists():
+                with Image.open(art_path(u["art"])) as im:
+                    art = im.convert("RGB")
+            card = render.render(u, art, tpl)
         card_dir(did).mkdir(parents=True, exist_ok=True)
         card.save(card_png(did, key), "PNG")
         card.resize((360, 504), Image.LANCZOS).save(card_thumb(did, key), "JPEG", quality=88)
+
+    def _official_card(self, deck: dict, u: dict, tpl: dict) -> Image.Image | None:
+        """The card from Scryfall's picture (the whole scan, or its art in the template), or None when the card is AI art or its image has not arrived."""
+        pr = u.get("printing")
+        if u.get("art_source", "forge") == "forge" or not pr:
+            return None
+        face = int(u.get("face", 0))
+        if resolver.policy_of(deck)["print"] == "template":
+            crop = scans.path_for(pr, face, "art_crop")
+            if not crop.exists():
+                return None
+            with Image.open(crop) as im:
+                art = im.convert("RGB")
+            return render.render(u, art, tpl, footer_text=f"Illus. {pr.get('artist') or '?'}  |  TM & (c) Wizards of the Coast  |  PROXY, not for sale")
+        scan = scans.path_for(pr, face, "png")
+        return scans.official(scan) if scan.exists() else None
 
     def ensure_card(self, did: str, key: str, thumb: bool = False) -> Path:
         """The card's picture, drawn now if it is missing or older than the drawing code and templates."""
@@ -335,3 +431,56 @@ class Engine:
 
 def render_safe(name: str) -> str:
     return "".join(c for c in name if c.isalnum() or c in " -_'").strip()[:60]
+
+
+def resolve_deck(pr: Printings, deck: dict, pol: dict) -> dict:
+    """Give every card of the deck its printing under `pol`. Returns {"units", "order"} (the deck's own dicts are not changed). Cards the owner hung by hand (`locked`) keep their pick.
+    Basic lands with several copies are spread over the set's different arts: the card is split into `key#a`, `key#b` ... each with its share of the copies."""
+    units = {k: dict(u) for k, u in deck["units"].items()}
+    order = list(deck["order"])
+    for base, u in list(units.items()):                                        # undo an earlier split
+        subs = u.get("split")
+        if subs:
+            at = min((order.index(s) for s in subs if s in order), default=len(order))
+            order = [k for k in order if k not in subs]
+            order.insert(at, base)
+            for s in subs:
+                units.pop(s, None)
+            u.pop("split", None)
+    out_order: list[str] = []
+    for k in order:
+        u = units[k]
+        if u.get("locked"):
+            out_order.append(k)
+            continue
+        if pol["source"] == "forge":
+            u.update(art_source="forge", printing=None, note="")
+            out_order.append(k)
+            continue
+        if pol["source"] in ("vault", "budget"):
+            from . import vault
+            res = vault.pick(pr, u, pol)
+        else:
+            res = resolver.resolve_unit(pr, u, pol)
+        if res.get("printing") is None:
+            u.update(art_source="forge", printing=None, note=res["why"] + (" (pinned line not found)" if res.get("pin_missing") else ""))
+            out_order.append(k)
+            continue
+        oid = res["printing"]["oracle_id"]
+        arts = []
+        if pol.get("vary_basics", True) and pol["source"] == "archive" and resolver.is_basic(u) and u.get("copies", 1) > 1 and not res["fallback"]:
+            arts = resolver.basic_arts(pr, oid, res["printing"]["set_code"])
+        if len(arts) > 1:
+            counts = resolver.split_copies(u["copies"], len(arts))
+            subs = []
+            for i, (p, n) in enumerate(zip(arts, counts)):
+                sk = f"{k}#{chr(97 + i)}"
+                units[sk] = {**u, "key": sk, "copies": n, "split_of": k, "art_source": pol["source"], "printing": {**resolver.brief(p), "why": res["why"], "fallback": False}, "note": ""}
+                subs.append(sk)
+            u["split"] = subs
+            out_order.extend(subs)
+            continue
+        u.update(art_source=pol["source"], printing={**resolver.brief(res["printing"]), "why": res["why"], "fallback": res["fallback"], "pin_missing": res.get("pin_missing", False)},
+                 note="", price=res.get("price"))
+        out_order.append(k)
+    return {"units": units, "order": out_order}

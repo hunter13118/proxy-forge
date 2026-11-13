@@ -13,7 +13,7 @@ from PIL import Image
 from pydantic import BaseModel
 from studio_kit import web_auth
 
-from . import export, lora_train, render, store
+from . import config, export, lora_train, render, resolver, scans, store, vault
 from .studio import StudioError
 from .engine import Engine, art_path, card_png, card_thumb, safe
 
@@ -36,6 +36,23 @@ class DeckIn(BaseModel):
     profile: str = ""
     template: str = "classic"
     include_sideboard: bool = False
+    art_policy: dict | None = None
+
+
+class ArtPolicyIn(BaseModel):
+    source: str = "archive"
+    sets: list[str] = []
+    family: bool = True
+    treatment: str = "regular"
+    pins: bool = True
+    fallback: str = "nearest"
+    vary_basics: bool = True
+    vault: dict = {}
+    print: str = "scan"
+
+
+class PrintingIn(BaseModel):
+    printing_id: str | None = None
 
 
 class DeckPatch(BaseModel):
@@ -120,7 +137,7 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
         return {"studio": info is not None, "studio_problem": problem, "studio_url": eng.studio.url,
                 "comfy": bool(picture.get("ready")), "picture_model": picture.get("model"), "unet": picture.get("unet"),
                 "text_model": (info or {}).get("text", {}).get("model"), "vision_model": (info or {}).get("vision", {}).get("model"),
-                "scryfall_cards": eng.scry.count(), "scryfall_age_days": round((eng.scry.age() or 0) / 86400, 1) if eng.scry.age() is not None else None,
+                "printings": eng.prt.count() if eng.prt.ready() else 0, "printings_age_days": round(eng.prt.age() / 86400, 1) if eng.prt.ready() else None, "scryfall_cards": eng.scry.count(), "scryfall_age_days": round((eng.scry.age() or 0) / 86400, 1) if eng.scry.age() is not None else None,
                 "loras": [l for l in (info or {}).get("loras", {}).get("files", []) if not l.startswith("pf_")],
                 "trainer": bool(train.get("available")), "trainer_problem": problem or train.get("why")}
 
@@ -271,6 +288,8 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
         except KeyError:
             raise HTTPException(400, "no such template")
         d = store.new_deck(b.name, b.profile, b.template, b.include_sideboard)
+        if b.art_policy:
+            store.update_deck(d["id"], lambda x: x.update(art_policy={**resolver.DEFAULT_POLICY, **b.art_policy}))
         return {"deck": d["id"], "job": eng.import_deck(d["id"], b.text).public()}
 
     @app.get("/api/decks/{did}")
@@ -376,6 +395,104 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
     def job_cancel(jid: str):
         _need(eng.jobs.get(jid), "no such job").cancel = True
         return {"ok": True}
+
+    # --------------------------------------------------------------------------------------------------------------------------------------- official art: sets, printings
+    def _index():
+        if not eng.prt.ready():
+            raise HTTPException(409, "The printings index is not built yet (POST /api/index).")
+        return eng.prt
+
+    @app.post("/api/index")
+    def index_build():
+        return eng.submit("index", None, lambda job: eng.prt.build(lambda m: setattr(job, "msg", m)), queue="net").public()
+
+    @app.get("/api/sets")
+    def sets(q: str = "", type: str = ""):
+        return [{"code": s["code"], "name": s["name"], "set_type": s["set_type"], "released_at": s["released_at"], "card_count": s["card_count"], "parent": s["parent"]}
+                for s in _index().sets(q, type)]
+
+    @app.get("/api/sets/{code}/icon.svg")
+    def set_icon(code: str):
+        code = safe(code)
+        f = config.folder("scryfall", "icons") / f"{code}.svg"
+        if not f.exists():
+            with _index()._db() as db:
+                row = db.execute("select icon_uri from sets where code=?", (code,)).fetchone()
+            if not row or not row[0]:
+                raise HTTPException(404, "no such set")
+            import httpx
+            r = httpx.get(row[0], headers={"User-Agent": config.SCRYFALL_UA}, timeout=20, follow_redirects=True)
+            r.raise_for_status()
+            f.write_bytes(r.content)
+        return FileResponse(f, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=604800"})
+
+    @app.get("/api/decks/{did}/coverage")
+    def coverage(did: str):
+        d = _need(store.get_deck(did), "no such deck")
+        pr = _index()
+        bases = list(dict.fromkeys(d["units"][k].get("split_of", k) for k in d["order"]))
+        oids = [o for o in (resolver.oracle_of(pr, d["units"][b]) for b in bases) if o]
+        cov = pr.coverage(oids)
+        info = {s["code"]: s for s in pr.sets()}
+        return {"total": len(set(oids)), "sets": [{"code": c, "name": info[c]["name"], "set_type": info[c]["set_type"], "released_at": info[c]["released_at"], "have": n}
+                                                  for c, n in cov.items() if c in info]}
+
+    @app.put("/api/decks/{did}/art-policy")
+    def art_policy(did: str, b: ArtPolicyIn):
+        _need(store.get_deck(did), "no such deck")
+        pol = {**resolver.DEFAULT_POLICY, **b.model_dump(exclude_none=True)}
+        if pol["source"] not in ("forge", "archive", "vault", "budget"):
+            raise HTTPException(400, "source must be forge, archive, vault or budget")
+        if pol["source"] == "archive" and not pol["sets"]:
+            raise HTTPException(400, "pick at least one set for Archive")
+        if pol["print"] not in ("scan", "template"):
+            raise HTTPException(400, "print must be scan or template")
+        return {"job": eng.apply_policy(did, pol).public()}
+
+    @app.get("/api/decks/{did}/units/{key}/printings")
+    def unit_printings(did: str, key: str):
+        d = _need(store.get_deck(did), "no such deck")
+        u = _need(d["units"].get(key), "no such card")
+        pr = _index()
+        oid = resolver.oracle_of(pr, u)
+        if oid is None:
+            return {"variants": []}
+        pol = resolver.policy_of(d)
+        cur = (u.get("printing") or {}).get("id")
+        out = []
+        for v in vault.appraise(pr, oid, {**pol, "source": "vault"}):
+            ps = [p for p in pr.variants(oid) if p["treatment"] == v["treatment"] and p["illustration_id"] == v["illustration_id"]]
+            allp = ps[0]["printings"] if ps else [v["printing"]]
+            out.append({"treatment": v["treatment"], "illustration_id": v["illustration_id"], "amount": v["amount"], "finish": v["finish"], "current": any(p["id"] == cur for p in allp),
+                        "best": v["printing"]["id"], "printings": [{"id": p["id"], "set": p["set_code"], "cn": p["cn"], "released": p["released_at"], "status": p["image_status"],
+                                                                    "current": p["id"] == cur} for p in allp]})
+        return {"currency": pol["vault"]["currency"], "variants": out}
+
+    @app.put("/api/decks/{did}/units/{key}/printing")
+    def unit_printing(did: str, key: str, b: PrintingIn):
+        d = _need(store.get_deck(did), "no such deck")
+        _need(d["units"].get(key), "no such card")
+        _index()
+        return {"job": eng.set_printing(did, key, b.printing_id).public()}
+
+    @app.get("/api/decks/{did}/appraisal")
+    def appraisal(did: str):
+        d = _need(store.get_deck(did), "no such deck")
+        cur = resolver.policy_of(d)["vault"]["currency"]
+        rows = [(d["units"][k], d["units"][k].get("price")) for k in d["order"] if d["units"][k].get("price")]
+        top = sorted(({"name": u["name"], "amount": p["amount"], "copies": u["copies"], "key": k} for k, u, p in ((k, d["units"][k], d["units"][k]["price"]) for k in d["order"]
+                                                                                                               if d["units"][k].get("price"))), key=lambda r: -r["amount"] * r["copies"])[:10]
+        return {"currency": cur, "total": round(sum(p["amount"] * u["copies"] for u, p in rows), 2), "priced": len(rows), "cards": len(d["order"]),
+                "as_of": next((p["as_of"] for _, p in rows), ""), "top": top}
+
+    @app.get("/api/scans/{pid}/{face}.jpg")
+    def scan_thumb(pid: str, face: int):
+        _index()
+        try:
+            p = eng._printing_row(pid)
+            return FileResponse(scans.fetch(p, face, "normal", eng.scan_transport), media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
+        except Exception as e:
+            raise HTTPException(404, str(e))
 
     @app.get("/health")
     def health():
