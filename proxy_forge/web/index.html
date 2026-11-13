@@ -142,6 +142,18 @@
         <p class="desc">Used for AI art, and for official art printed "in my frame".</p>
         <div id="templates" class="tiles"></div>
       </div>
+      <div class="panel" id="backs-box">
+        <h2>Card backs <small class="mute">optional, for two-sided printing</small></h2>
+        <p class="desc">Every card gets the same back, except a double-faced card, whose other side can be its back. Official, funny, your own picture, or drawn by the AI.</p>
+        <div id="back-tiles" class="tiles back-tiles"></div>
+        <input id="back-file" type="file" accept="image/*" hidden>
+        <div id="back-ai" class="back-ai" hidden>
+          <label>What should the AI draw on the back? <small>leave empty for an ornate generic back</small></label>
+          <textarea id="back-prompt" rows="2" placeholder="e.g. a coiled dragon around a moon, deep blue and gold"></textarea>
+          <div class="row"><div class="grow"><label>Seed</label><input id="back-seed" type="number" value="1"></div><button id="back-draw" class="primary">Draw the back</button></div>
+        </div>
+        <label class="check"><input id="back-dfc" type="checkbox" checked> Print a double-faced card's other side on its back (instead of a second card)</label>
+      </div>
     </section>
 
     <!-- III. Gallery -->
@@ -159,12 +171,25 @@
     <section class="view" id="v-press" hidden>
       <header class="vhead"><h1>The Press</h1><p>Sheets for your home printer, or a ZIP of pictures for a print shop.</p></header>
       <div class="press">
-        <div class="sheet-wrap"><div class="sheet" id="sheet"></div><div class="sheet-cap" id="sheet-cap"></div></div>
+        <div class="sheet-wrap"><div class="sheet" id="sheet"></div><div class="sheet-cap" id="sheet-cap"></div><div class="row center"><button id="sheet-side" class="ghost" hidden>Show the back page</button></div></div>
         <div class="press-opts">
           <label>Paper<select id="p-paper"><option value="a4">A4</option><option value="letter">US Letter</option></select></label>
           <label class="check"><input id="p-copies" type="checkbox" checked> print every copy in the list</label>
           <label class="check"><input id="skip-basics" type="checkbox"> leave basic lands out of the PDF</label>
           <div class="press-count" id="press-count"></div>
+          <div class="duplex">
+            <h3>Two-sided printing</h3>
+            <label>Preset<select id="d-preset"><option value="">Choose your printer…</option><option value="auto-long">Epson ET-2980 and other auto-duplex printers (the printer pulls the sheet back in)</option><option value="manual-long">Rear-feed or no-duplex printer (print all fronts, then re-feed for all backs)</option></select></label>
+            <label>Printing<select id="d-mode"><option value="none">Fronts only</option><option value="auto">Auto-duplex: front, back, front, back… (the printer flips each sheet)</option><option value="manual">All fronts first, then all backs (you re-feed the stack)</option></select></label>
+            <div id="d-more" hidden>
+              <label>Flip the sheet on its<select id="d-flip"><option value="long">long edge (like turning a book page)</option><option value="short">short edge (like flipping a notepad)</option></select></label>
+              <label class="check" id="d-rev-wrap"><input id="d-rev" type="checkbox"> backs come out in the opposite order (reverse the back pages)</label>
+              <label class="check" id="d-split-wrap"><input id="d-split" type="checkbox"> save fronts and backs as two separate PDFs</label>
+              <div class="row"><div class="grow"><label>Shift backs right (mm)</label><input id="d-dx" type="number" step="0.1" min="-5" max="5" value="0"></div><div class="grow"><label>Shift backs down (mm)</label><input id="d-dy" type="number" step="0.1" min="-5" max="5" value="0"></div></div>
+              <div class="row wrap"><button id="d-help" class="ghost">How to load my printer</button><button id="d-test" class="ghost">Alignment test sheet</button></div>
+              <p class="desc" id="d-note"></p>
+            </div>
+          </div>
           <button id="p-pdf" class="primary big">Print sheets (PDF)</button>
           <button id="p-zip" class="ghost">PNG pictures (ZIP)</button>
           <button id="p-shop" class="ghost" title="822 x 1122 px pictures with 1/8 inch bleed, for print shops and MPC">Print-shop ZIP with bleed</button>
@@ -205,6 +230,7 @@
     </div>
   </div>
 </dialog>
+<dialog id="help"><button id="help-close" class="ghost icon close" aria-label="Close">×</button><div id="help-body" class="help-body"></div></dialog>
 <script type="module" src="/app/js/main.js?v={{v}}"></script>
 </body>
 </html>

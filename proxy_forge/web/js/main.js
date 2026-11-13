@@ -6,6 +6,7 @@ import { wireDoors } from "./atlas.js";
 import { wireGallery, renderGallery } from "./gallery.js";
 import { wireLoupe } from "./loupe.js";
 import { wirePress, renderPress } from "./press.js";
+import { wireBacks } from "./backs.js";
 
 function go(view) {
   for (const v of document.querySelectorAll(".view")) v.hidden = v.id !== "v-" + view;
@@ -72,7 +73,7 @@ function wire() {
     document.documentElement.dataset.theme = light ? "dark" : "light"; remember("theme", light ? "dark" : "light");
   };
   const t = recall("theme"); if (t) document.documentElement.dataset.theme = t;
-  wireForge(); wireDeck(); wireDoors(generate); wireGallery(); wireLoupe(); wirePress();
+  wireForge(); wireDeck(); wireDoors(generate); wireGallery(); wireLoupe(); wirePress(); wireBacks();
 }
 
 (async function start() {
