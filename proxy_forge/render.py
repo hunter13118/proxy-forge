@@ -475,7 +475,6 @@ def style_fullart(img, unit, art, tpl, th):
     _rr(d, tpl["text_box"], 12, fill=(8, 8, 10, 175), outline=th.accent, width=2)
     if _has_pt(unit):
         _rr(d, tpl["pt_box"], 14, fill=(8, 8, 10, 235), outline=th.accent, width=4)
-    d.rounded_rectangle((4, 4, W - 5, H - 5), 40, outline=th.frame, width=8)
 
 
 def style_noir(img, unit, art, tpl, th):
@@ -503,12 +502,10 @@ def _tint_panel(img: Image.Image, box, radius: int, c1: str, c2: str | None, alp
 
 
 def style_topframe(img, unit, art, tpl, th):
-    """Full-bleed picture inside a black border, with a header tinted in the card's colour and translucent dark type and rules panels over it."""
+    """Full-bleed picture, edge to edge, with a header tinted in the card's colour and translucent dark type and rules panels over it."""
     d = ImageDraw.Draw(img, "RGBA")
     ax, ay, aw, ah = [int(v) for v in tpl["art_box"]]
-    _paste_rounded(img, _art(unit, art, th, tpl, (aw, ah)), (ax, ay, aw, ah), 26)
-    d.rounded_rectangle((ax, ay, ax + aw, ay + ah), 26, outline="#050505", width=4)
-    d.rounded_rectangle((ax + 5, ay + 5, ax + aw - 5, ay + ah - 5), 22, outline=(255, 255, 255, 50), width=2)
+    img.paste(_art(unit, art, th, tpl, (aw, ah)), (ax, ay))               # the picture runs to the card's edge: no black border
     dark = "#0a0a0d"
     _tint_panel(img, tpl["name_box"], 12, mix(dark, th.frame, 0.5), mix(dark, th.frame2, 0.5) if th.frame2 else None, 195, th.accent)
     _rr(d, tpl["type_box"], 12, fill=(8, 8, 10, 175), outline=th.accent, width=2)

@@ -1,10 +1,10 @@
 {
   "id": "topframe",
   "name": "Tinted header",
-  "blurb": "Full-bleed picture in a black border; the name header is tinted in the card's colour, the type line and rules text sit on dark translucent panels.",
+  "blurb": "Full-bleed picture, edge to edge; the name header is tinted in the card's colour, the type line and rules text sit on dark translucent panels.",
   "style": "topframe",
-  "frame_box": [30, 30, 690, 968],
-  "art_box": [30, 30, 690, 968],
+  "frame_box": [0, 0, 750, 1050],
+  "art_box": [0, 0, 750, 1050],
   "name_box": [48, 44, 654, 62],
   "type_box": [48, 604, 654, 54],
   "text_box": [48, 668, 654, 262],
