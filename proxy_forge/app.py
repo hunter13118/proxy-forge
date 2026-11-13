@@ -501,7 +501,7 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
     @app.get("/", include_in_schema=False)
     def page():
         # the script and stylesheet carry the time of the last change in their URL: a new URL is never answered from an old copy kept by the browser or Cloudflare's edge
-        v = str(int(max(p.stat().st_mtime for p in WEB_DIR.iterdir() if p.is_file())))
+        v = str(int(max(p.stat().st_mtime for p in WEB_DIR.rglob("*") if p.is_file())))
         return Response((WEB_DIR / "index.html").read_text(encoding="utf-8").replace("{{v}}", v), media_type="text/html", headers={"Cache-Control": "no-store"})
 
     app.mount("/app", NoStoreStatic(directory=str(WEB_DIR)), name="web")

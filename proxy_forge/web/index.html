@@ -3,107 +3,205 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>proxy-forge</title>
+<title>Proxy Forge</title>
 <link rel="stylesheet" href="/app/style.css?v={{v}}">
 </head>
 <body>
-<header>
-  <h1>proxy-forge</h1>
-  <div class="status" id="status"></div>
-  <div id="who" hidden></div>
-</header>
+<div id="toasts" aria-live="polite"></div>
+<div id="gate" hidden><div><h2>Proxy Forge</h2><p>Sign in to continue.</p><div id="gate-box"></div></div></div>
 
-<div id="gate" hidden><div><h2>proxy-forge</h2><p>Sign in to continue.</p><div id="gate-box"></div></div></div>
+<div class="shell">
+  <nav class="rail" aria-label="Steps">
+    <div class="brand" title="Proxy Forge"><span>P</span><b>Forge</b></div>
+    <button class="step on" data-view="deck"><i>I</i><span>Deck</span></button>
+    <button class="step" data-view="source"><i>II</i><span>Source</span></button>
+    <button class="step" data-view="gallery"><i>III</i><span>Gallery</span></button>
+    <button class="step" data-view="press"><i>IV</i><span>Press</span></button>
+    <div class="rail-foot">
+      <div class="status" id="status"></div>
+      <button id="theme" class="ghost icon" title="Switch between the night and daylight gallery" aria-label="Switch theme">◐</button>
+      <div id="who" hidden></div>
+    </div>
+  </nav>
 
-<main>
-  <aside id="side">
-    <section id="s-style">
-      <h2><span>1</span> Style</h2>
-      <div class="row">
-        <select id="profile"></select>
-        <button id="profile-new" class="ghost">New</button>
+  <main>
+    <!-- I. Deck -->
+    <section class="view" id="v-deck">
+      <header class="vhead"><h1>The Threshold</h1><p>Paste a deck list, or drop a text file onto the page. Every card becomes a card to hang.</p></header>
+      <div class="threshold">
+        <div class="well" id="well">
+          <input id="deck-name" placeholder="Deck name" value="My deck" aria-label="Deck name">
+          <textarea id="deck-text" rows="14" placeholder="1 Sol Ring&#10;4 Lightning Bolt&#10;1 Command Tower (CMM) 420&#10;&#10;Sideboard&#10;2 Negate" aria-label="Deck list"></textarea>
+          <div class="well-foot">
+            <label class="check"><input id="deck-sb" type="checkbox"> include the sideboard</label>
+            <button id="deck-import" class="primary">Import deck</button>
+          </div>
+        </div>
+        <aside class="ledger">
+          <h3>Ledger</h3>
+          <div id="ledger" class="ledger-lines"><span>Nothing yet.</span></div>
+          <h3>Your decks</h3>
+          <div class="row"><select id="deck-pick" aria-label="Open a deck"></select><button id="deck-delete" class="ghost danger" title="Delete this deck">Delete</button></div>
+          <div id="deck-notes" class="notes"></div>
+        </aside>
       </div>
-      <label>Direction <small>how the art should feel</small></label>
-      <textarea id="direction" rows="3" placeholder="e.g. warm watercolor, golden-hour light, the heroes look like my friends"></textarea>
-      <div class="row">
-        <div class="grow"><label>LoRA <small>optional</small></label><select id="lora"></select></div>
-        <div class="narrow"><label>Strength</label><input id="lora-strength" type="number" min="0" max="1.5" step="0.1" value="0.8"></div>
+    </section>
+
+    <!-- II. Source -->
+    <section class="view" id="v-source" hidden>
+      <header class="vhead"><h1>Three doors</h1><p>Where does each card's picture come from? Choose for the whole deck; change any single card later in the Loupe.</p></header>
+      <div class="doors" role="tablist">
+        <button class="door" data-door="forge" role="tab"><div class="arch"><span class="glyph">✦</span></div><h3>Forge</h3><p>Draw new art with AI, in your style and with your people.</p></button>
+        <button class="door" data-door="archive" role="tab"><div class="arch"><span class="glyph">❖</span></div><h3>Archive</h3><p>Official art from exactly the set you choose.</p></button>
+        <button class="door" data-door="vault" role="tab"><div class="arch"><span class="glyph">◆</span></div><h3>Vault</h3><p>The most (or least) expensive printing of every card.</p></button>
       </div>
-      <div class="cartoon">
-        <label class="check"><input id="cartoon-on" type="checkbox" checked> Keep the cartoon look on people drawn with a LoRA</label>
-        <div id="cartoon-opts">
-          <label>Cartoon strength <b id="cartoon-val"></b></label>
-          <input id="cartoon-strength" type="range" min="0.1" max="0.8" step="0.05" value="0.4">
-          <div class="desc">A LoRA trained on photos drags the picture toward a photograph. With this on, those pictures get cartoon style words and then a second pass through the plain cartoon model. Higher keeps more of the cartoon look but loosens the likeness; lower keeps the likeness but looks more like a photo. Costs a few extra seconds per card.</div>
-          <label>Cartoon words</label>
-          <input id="cartoon-tags" placeholder="cartoon, anime style, cel shading, ...">
+
+      <div class="panel" id="door-forge" hidden>
+        <div class="cols">
+          <div>
+            <h2>Style</h2>
+            <div class="row">
+              <select id="profile" aria-label="Style"></select>
+              <button id="profile-new" class="ghost">New</button>
+            </div>
+            <label>Direction <small>how the art should feel</small></label>
+            <textarea id="direction" rows="3" placeholder="e.g. warm watercolor, golden-hour light, the heroes look like my friends"></textarea>
+            <div class="row">
+              <div class="grow"><label>LoRA <small>optional</small></label><select id="lora"></select></div>
+              <div class="narrow"><label>Strength</label><input id="lora-strength" type="number" min="0" max="1.5" step="0.1" value="0.8"></div>
+            </div>
+            <div class="cartoon">
+              <label class="check"><input id="cartoon-on" type="checkbox" checked> Keep the cartoon look on people drawn with a LoRA</label>
+              <div id="cartoon-opts">
+                <label>Cartoon strength <b id="cartoon-val"></b></label>
+                <input id="cartoon-strength" type="range" min="0.1" max="0.8" step="0.05" value="0.4">
+                <div class="desc">A LoRA trained on photos drags the picture toward a photograph. With this on, those pictures get cartoon style words and then a second pass through the plain cartoon model. Higher keeps more of the cartoon look but loosens the likeness; lower keeps the likeness but looks more like a photo. Costs a few extra seconds per card.</div>
+                <label>Cartoon words</label>
+                <input id="cartoon-tags" placeholder="cartoon, anime style, cel shading, ...">
+              </div>
+            </div>
+          </div>
+          <div>
+            <h2>People</h2>
+            <p class="desc">Photos become a written description; the photos never leave this PC.</p>
+            <div id="subjects"></div>
+            <button id="subject-new" class="ghost">+ Add a person</button>
+            <h2 style="margin-top:22px">Make it</h2>
+            <div class="row wrap">
+              <button id="gen" class="primary" disabled>Generate art</button>
+              <button id="regen" class="ghost" disabled title="Write every prompt again from the current style, then draw again">Rewrite prompts &amp; redraw all</button>
+            </div>
+          </div>
         </div>
       </div>
-      <label>People <small>photos become a written description; the photos never leave this PC</small></label>
-      <div id="subjects"></div>
-      <button id="subject-new" class="ghost">+ Add a person</button>
-    </section>
 
-    <section id="s-template">
-      <h2><span>2</span> Template</h2>
-      <div id="templates" class="tiles"></div>
-    </section>
-
-    <section id="s-deck">
-      <h2><span>3</span> Deck</h2>
-      <div class="row">
-        <select id="deck-pick"></select>
-        <button id="deck-delete" class="ghost danger" title="Delete this deck">Delete</button>
+      <div class="panel" id="door-archive" hidden>
+        <div class="atlas-head">
+          <div class="grow">
+            <h2>The Atlas</h2>
+            <p class="desc" id="atlas-note">Every set, with how many of your cards it holds. Tap sets to build a chain: the first set that has a card wins.</p>
+          </div>
+          <div class="atlas-tools">
+            <input id="atlas-q" type="search" placeholder="Find a set (name or code)" aria-label="Find a set">
+            <div class="chips" id="atlas-types"></div>
+          </div>
+        </div>
+        <div id="ribbon" class="ribbon" aria-label="Release years: tap a year to filter"></div>
+        <div id="atlas" class="atlas"></div>
+        <div class="row center"><button id="atlas-more" class="ghost" hidden>Show more sets</button></div>
+        <div class="chain" id="chain" aria-label="Chosen sets, in order"></div>
+        <div class="opts">
+          <label>Treatment<select id="o-treatment"><option value="regular">regular first</option><option value="showcase">showcase first</option><option value="borderless">borderless first</option><option value="extended">extended art first</option><option value="any">any</option></select></label>
+          <label>Not in the chain<select id="o-fallback"><option value="nearest">nearest set in time</option><option value="default">default printing</option><option value="forge">AI art</option><option value="blank">leave it blank (AI)</option></select></label>
+          <label>Print as<select id="o-print"><option value="scan">official scan, whole</option><option value="template">art in my frame</option></select></label>
+          <label class="check"><input id="o-family" type="checkbox" checked> include the sets' promo &amp; bonus children</label>
+          <label class="check"><input id="o-pins" type="checkbox" checked> honor <code>(SET) 123</code> in the list</label>
+          <label class="check"><input id="o-vary" type="checkbox" checked> vary the art of basic lands</label>
+        </div>
+        <div class="row"><button id="archive-go" class="primary" disabled>Hang the deck from these sets</button></div>
       </div>
-      <input id="deck-name" placeholder="Deck name" value="My deck">
-      <textarea id="deck-text" rows="7" placeholder="4 Lightning Bolt&#10;1 Sol Ring&#10;24 Mountain"></textarea>
-      <label class="check"><input id="deck-sb" type="checkbox"> include the sideboard</label>
-      <button id="deck-import" class="primary">Import deck</button>
-      <div id="deck-notes"></div>
+
+      <div class="panel" id="door-vault" hidden>
+        <h2>The Vault</h2>
+        <p class="desc">For every card, the art variant (one painting in one treatment, not just a foil copy) with the highest market price. Prices are Scryfall's daily snapshot of TCGplayer and Cardmarket; every pick shows its price and date.</p>
+        <div class="opts">
+          <label>Pick<select id="v-kind"><option value="vault">the priciest</option><option value="budget">the cheapest (what it costs to buy)</option></select></label>
+          <label>Currency<select id="v-currency"><option value="usd">USD (TCGplayer)</option><option value="eur">EUR (Cardmarket)</option></select></label>
+          <label class="check"><input id="v-foil" type="checkbox" checked> count foil and etched prices</label>
+          <label class="check"><input id="v-serialized" type="checkbox"> count serialized (numbered) cards</label>
+          <label class="check"><input id="v-scope" type="checkbox"> only within the sets chosen in the Archive</label>
+        </div>
+        <div class="row"><button id="vault-go" class="primary" disabled>Appraise the deck</button></div>
+      </div>
+
+      <div class="panel" id="frame-box">
+        <h2>Card frame</h2>
+        <p class="desc">Used for AI art, and for official art printed "in my frame".</p>
+        <div id="templates" class="tiles"></div>
+      </div>
     </section>
 
-    <section id="s-gen">
-      <h2><span>4</span> Make it</h2>
-      <button id="gen" class="primary" disabled>Generate art</button>
-      <button id="regen" class="ghost" disabled title="Write every prompt again from the current style, then draw again">Rewrite prompts &amp; redraw all</button>
-      <div id="progress" hidden>
-        <div class="bar"><i id="bar"></i></div>
-        <div class="row"><span id="progress-msg"></span><button id="cancel" class="ghost">Cancel</button></div>
-      </div>
-      <div class="row">
-        <a id="pdf-letter" class="btn" href="#">PDF · Letter</a>
-        <a id="pdf-a4" class="btn" href="#">PDF · A4</a>
-        <a id="zip" class="btn" href="#">PNGs</a>
-      </div>
-      <label class="row" title="Leave basic lands out of the PDF to save sheets"><input type="checkbox" id="skip-basics"> Skip basic lands in the PDF</label>
+    <!-- III. Gallery -->
+    <section class="view" id="v-gallery" hidden>
+      <header class="vhead split">
+        <div><h1 id="g-title">The Gallery</h1><p id="g-sub"></p></div>
+        <div class="chips" id="g-filter" role="tablist"></div>
+      </header>
+      <div id="appraisal" class="appraisal" hidden></div>
+      <div id="empty" class="empty">Import a deck first, then choose where its pictures come from.</div>
+      <div id="grid" class="wall"></div>
     </section>
-  </aside>
 
-  <section id="grid-wrap">
-    <div id="empty">Pick a style and a template, paste a deck list, and import it. Your cards show up here.</div>
-    <div id="grid"></div>
-  </section>
-</main>
+    <!-- IV. Press -->
+    <section class="view" id="v-press" hidden>
+      <header class="vhead"><h1>The Press</h1><p>Sheets for your home printer, or a ZIP of pictures for a print shop.</p></header>
+      <div class="press">
+        <div class="sheet-wrap"><div class="sheet" id="sheet"></div><div class="sheet-cap" id="sheet-cap"></div></div>
+        <div class="press-opts">
+          <label>Paper<select id="p-paper"><option value="a4">A4</option><option value="letter">US Letter</option></select></label>
+          <label class="check"><input id="p-copies" type="checkbox" checked> print every copy in the list</label>
+          <label class="check"><input id="skip-basics" type="checkbox"> leave basic lands out of the PDF</label>
+          <div class="press-count" id="press-count"></div>
+          <button id="p-pdf" class="primary big">Print sheets (PDF)</button>
+          <button id="p-zip" class="ghost">PNG pictures (ZIP)</button>
+          <button id="p-shop" class="ghost" title="822 x 1122 px pictures with 1/8 inch bleed, for print shops and MPC">Print-shop ZIP with bleed</button>
+          <p class="desc">Print at <b>100% / Actual size</b>. Cards are 63 x 88 mm. Every card carries a small "PROXY" line: they are for playtesting only.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
 
-<dialog id="modal">
-  <div class="modal-body">
-    <img id="m-img" alt="">
-    <div class="m-side">
-      <h3 id="m-name"></h3>
-      <label>Art prompt</label>
-      <textarea id="m-prompt" rows="9"></textarea>
-      <div class="row"><div class="grow"><label>Seed</label><input id="m-seed" type="number"></div></div>
-      <div id="m-subjects"></div>
-      <p id="m-error" class="err"></p>
-      <div class="row wrap">
-        <button id="m-save" class="primary">Save &amp; redraw</button>
-        <button id="m-reroll" class="ghost">New seed &amp; redraw</button>
-        <button id="m-rewrite" class="ghost">Rewrite prompt</button>
-        <button id="m-close" class="ghost">Close</button>
+<div id="dock" hidden><div class="bar"><i id="bar"></i></div><span id="dock-msg"></span><button id="cancel" class="ghost">Cancel</button></div>
+
+<dialog id="loupe">
+  <button id="l-close" class="ghost icon close" aria-label="Close">×</button>
+  <div class="loupe-body">
+    <div class="stage"><div class="lens-host" id="l-host"><img id="l-img" alt=""><div id="lens" hidden></div></div><p class="hint">Hover the card to magnify. <kbd>[</kbd> <kbd>]</kbd> step through art · <kbd>P</kbd> hang · <kbd>Esc</kbd> close</p></div>
+    <div class="side">
+      <h2 id="l-name"></h2>
+      <div id="l-prov" class="prov"></div>
+      <div class="tabs"><button class="tab on" data-tab="official">Official art</button><button class="tab" data-tab="ai">AI art</button></div>
+      <div id="l-official">
+        <div class="row"><input id="l-filter" type="search" placeholder="Filter by set or treatment"></div>
+        <div id="l-strip" class="strip"></div>
+        <div class="row wrap"><button id="l-hang" class="primary" disabled>Hang this one</button><span id="l-pick" class="mute"></span></div>
+      </div>
+      <div id="l-ai" hidden>
+        <label>Art prompt</label>
+        <textarea id="m-prompt" rows="8"></textarea>
+        <div class="row"><div class="grow"><label>Seed</label><input id="m-seed" type="number"></div></div>
+        <div id="m-subjects"></div>
+        <p id="m-error" class="err"></p>
+        <div class="row wrap">
+          <button id="m-save" class="primary">Save &amp; redraw</button>
+          <button id="m-reroll" class="ghost">New seed</button>
+          <button id="m-rewrite" class="ghost">Rewrite prompt</button>
+        </div>
       </div>
     </div>
   </div>
 </dialog>
-<script src="/app/app.js?v={{v}}"></script>
+<script type="module" src="/app/js/main.js?v={{v}}"></script>
 </body>
 </html>

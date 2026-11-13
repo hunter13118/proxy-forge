@@ -41,7 +41,7 @@ def _pref_rank(p: dict, pref: str) -> int:
         return 0
     if pref == "regular":
         return 0 if t.startswith("regular") else 1
-    return 0 if pref in t.replace("extended", "extended").split("-") else 1
+    return 0 if pref in t.split("-") else 1
 
 
 def pick_in_set(cands: list[dict], pref: str) -> dict | None:
@@ -73,13 +73,22 @@ def _days(a: str | None, b: str | None) -> int:
         return 10 ** 6
 
 
+ODD_SETS = {"promo", "box", "memorabilia", "funny", "token", "minigame", "spellbook", "vanguard", "treasure_chest", "alchemy", "arsenal", "masterpiece"}
+
+
 def _nearest(pr: Printings, oid: str, anchor_set: str, pref: str) -> tuple[dict | None, str]:
+    """The set closest in time to the anchor set (by the sets' release dates; Secret Lair, promos and the like only when nothing ordinary has the card)."""
     allp = [p for p in pr.for_oracle(oid) if usable(p)]
     if not allp:
         return None, ""
-    srel = next((s["released_at"] for s in pr.sets() if s["code"] == anchor_set), None)
-    best_set = min({p["set_code"] for p in allp}, key=lambda c: min(_days(p["released_at"], srel) for p in allp if p["set_code"] == c))
-    p = pick_in_set([x for x in allp if x["set_code"] == best_set], pref)
+    info = {s["code"]: s for s in pr.sets()}
+    srel = info.get(anchor_set, {}).get("released_at")
+
+    def rank(code: str):
+        s = info.get(code, {})
+        return (s.get("set_type") in ODD_SETS, _days(s.get("released_at"), srel))
+    best = min({p["set_code"] for p in allp}, key=rank)
+    p = pick_in_set([x for x in allp if x["set_code"] == best], pref)
     return p, f"nearest to {anchor_set.upper()}"
 
 
