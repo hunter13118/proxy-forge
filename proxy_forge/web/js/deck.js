@@ -38,7 +38,19 @@ export async function openDeck(id) {
   remember("deck", id);
   if (S.deck.template) { S.template = S.deck.template; emit("template"); }
   $("deck-name").value = S.deck.name;
+  $("deck-text").value = S.deck.text || rebuiltList(S.deck);
+  $("deck-sb").checked = !!S.deck.include_sideboard;
+  showLedger();
   emit("deck", S.deck);
+}
+
+// Decks made before the list was kept: rebuilt from what was imported (quantities and names; the set and number of each line are not kept in those).
+function rebuiltList(d) {
+  const by = {};
+  for (const e of d.entries || []) (by[e.section] = by[e.section] || []).push(`${e.qty} ${e.name}`);
+  const head = { commander: "Commander", main: "Deck", sideboard: "Sideboard" };
+  const single = Object.keys(by).length === 1 && by.main;
+  return Object.entries(by).map(([sec, lines]) => (single ? "" : (head[sec] || sec) + "\n") + lines.join("\n")).join("\n\n");
 }
 
 export function deckNotes() {

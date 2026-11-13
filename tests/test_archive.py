@@ -479,3 +479,14 @@ def test_token_loupe_lists_every_token_of_the_name_and_hanging_another_changes_i
     eng._qs["net"].get()[1](Job("pin", did, "net"))
     u2 = store.get_deck(did)["units"][u["key"]]
     assert u2["printing"]["set"] == "tc16" and u2["power"] == "0" and u2["oracle_id"] == "tok-insect-b" and u2["locked"] and u2["key"] == u["key"]
+
+
+def test_the_pasted_list_is_kept_with_the_deck(env):
+    from fastapi.testclient import TestClient
+
+    from proxy_forge.app import create_app
+    eng, _ = env
+    c = TestClient(create_app(eng))
+    text = "1 Sol Ring (CMM) 410\n10x Island (mh3) 300 [Land]\n"
+    did = c.post("/api/decks", json={"name": "kept", "text": text}).json()["deck"]
+    assert c.get(f"/api/decks/{did}").json()["text"] == text

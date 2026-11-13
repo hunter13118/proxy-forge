@@ -296,6 +296,7 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
         except KeyError:
             raise HTTPException(400, "no such template")
         d = store.new_deck(b.name, b.profile, b.template, b.include_sideboard)
+        store.update_deck(d["id"], lambda x: x.update(text=b.text))               # the list as pasted, so opening the deck again shows it
         if b.art_policy:
             store.update_deck(d["id"], lambda x: x.update(art_policy={**resolver.DEFAULT_POLICY, **b.art_policy}))
         return {"deck": d["id"], "job": eng.import_deck(d["id"], b.text).public()}
