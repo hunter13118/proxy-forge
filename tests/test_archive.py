@@ -347,3 +347,32 @@ def test_importers_files_and_archidekt():
         importers.from_archidekt("https://example.com/x")
     with pytest.raises(importers.ImportError_):
         importers.from_archidekt("https://archidekt.com/decks/9/x", tr)
+
+
+ARCHIDEKT = """1x Sol Ring (cmm) 400 [Artifact]
+1x Ragavan (mh3) 312 *F* [Creature]
+10x Island (mh3) 300 [Land]
+10x Island (mh3) 302 [Land]
+1x Atraxa (c16) 28 *F* [Commander{top}]
+"""
+
+
+def test_archidekt_text_export_parses_categories_foil_and_separate_pins():
+    from proxy_forge import deck
+    es = deck.parse(ARCHIDEKT)
+    by = {(e.name, e.set, e.number): e for e in es}
+    assert by[("Sol Ring", "cmm", "400")].section == "main" and by[("Ragavan", "mh3", "312")].qty == 1
+    assert by[("Atraxa", "c16", "28")].section == "commander"
+    assert by[("Island", "mh3", "300")].qty == 10 and by[("Island", "mh3", "302")].qty == 10          # not merged into 20 of one printing
+    assert len(es) == 5
+
+
+def test_one_card_pinned_to_several_printings_becomes_one_card_per_pin(pr):
+    u = {**unit("Island", "o-island", copies=20, type_line="Basic Land — Island"), "pin": {"set": "mh3", "number": "300"},
+         "pins": [{"set": "mh3", "number": "300", "qty": 10}, {"set": "mh3", "number": "302", "qty": 10}]}
+    out = resolve_deck(pr, {"units": {u["key"]: u}, "order": [u["key"]]}, pol(sets=["cmm"]))
+    subs = [out["units"][k] for k in out["order"]]
+    assert [(s["printing"]["cn"], s["copies"]) for s in subs] == [("300", 10), ("302", 10)]
+    u2 = {**u, "copies": 12, "pins": [{"set": "mh3", "number": "300", "qty": 10}]}                      # 2 more copies without a pin follow the chain
+    out = resolve_deck(pr, {"units": {u2["key"]: u2}, "order": [u2["key"]]}, pol(sets=["mh3"]))
+    assert sum(out["units"][k]["copies"] for k in out["order"]) == 12 and len(out["order"]) == 2

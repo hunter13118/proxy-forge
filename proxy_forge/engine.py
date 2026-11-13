@@ -133,11 +133,19 @@ class Engine:
             for u in card_units(card):
                 k = u["key"]
                 keys.append(k)
+                pin = {"set": e.set, "number": e.number, "qty": e.qty} if e.set else None
                 if k in units:
                     units[k]["copies"] += e.qty
+                    if pin:
+                        same = next((x for x in units[k]["pins"] if (x["set"], x["number"]) == (pin["set"], pin["number"])), None)
+                        if same:
+                            same["qty"] += pin["qty"]
+                        else:
+                            units[k]["pins"].append(pin)
+                        units[k]["pin"] = units[k]["pin"] or {"set": pin["set"], "number": pin["number"]}
                     continue
                 seed = int(hashlib.sha1((did + k).encode()).hexdigest()[:8], 16)
-                units[k] = {**u, "copies": e.qty, "prompt": "", "seed": seed, "subjects": [], "art": "", "art_shape": "", "status": "new", "error": "", "pin": ({"set": e.set, "number": e.number} if e.set else None)}
+                units[k] = {**u, "copies": e.qty, "prompt": "", "seed": seed, "subjects": [], "art": "", "art_shape": "", "status": "new", "error": "", "pin": ({"set": e.set, "number": e.number} if e.set else None), "pins": [pin] if pin else []}
                 order.append(k)
             out_entries.append({"qty": e.qty, "name": card.get("name", e.name), "section": e.section, "found": True, "keys": keys})
 
@@ -472,6 +480,26 @@ def resolve_deck(pr: Printings, deck: dict, pol: dict) -> dict:
         if pol["source"] == "forge":
             u.update(art_source="forge", printing=None, note="")
             out_order.append(k)
+            continue
+        pins = [x for x in u.get("pins") or [] if pol.get("pins", True)]
+        if len(pins) > 1 or (pins and pins[0]["qty"] < u.get("copies", 1)):
+            subs, rest = [], u["copies"] - sum(x["qty"] for x in pins)
+            groups = [(x, x["qty"]) for x in pins] + ([({"set": "", "number": ""}, rest)] if rest > 0 else [])
+            for i, (x, n) in enumerate(groups):
+                sk = f"{k}#{chr(97 + i)}"
+                sub = {**u, "key": sk, "copies": n, "split_of": k, "pin": ({"set": x["set"], "number": x["number"]} if x["set"] else None), "pins": []}
+                r = resolver.resolve_unit(pr, sub, pol) if pol["source"] == "archive" or x["set"] else None
+                if r is None and pol["source"] in ("vault", "budget"):
+                    from . import vault
+                    r = vault.pick(pr, sub, pol)
+                if r.get("printing") is None:
+                    sub.update(art_source="forge", printing=None, note=r["why"])
+                else:
+                    sub.update(art_source=pol["source"], printing={**resolver.brief(r["printing"]), "why": r["why"], "fallback": r["fallback"], "pin_missing": r.get("pin_missing", False)}, note="", price=r.get("price"))
+                units[sk] = sub
+                subs.append(sk)
+            u["split"] = subs
+            out_order.extend(subs)
             continue
         if pol["source"] in ("vault", "budget"):
             from . import vault
