@@ -73,3 +73,16 @@ Sign-in (`studio_kit/web_auth.py`): at home (localhost) nothing is asked. A requ
 - The sign-in flow with a real Clerk session has not been tried end to end (only refusals of missing and forged tokens were checked), same as the studio's.
 - Planeswalker, saga and class layouts use the standard text box. Tokens are not drawn.
 - The studio's own `comfy.py` now has the LoRA stack and restyle pass proxy-forge needs; `loras.py` and `clerk_auth.py` are still duplicated in `studio-kit` (the studio could import them from there, a separate change).
+
+## Official art: Archive and Vault
+
+Besides the AI art ("Forge"), a deck can take its pictures from Scryfall's official images (page step II, "Source"):
+
+- **Archive**: pick a set, or a chain of sets (the first one that has a card wins). Every card resolves to a printing whose set code is exactly that set (matched on set code + collector number, never "a printing with the same name"); a card not printed there takes the fallback you chose (nearest set in time, default printing, AI art) and is marked amber with the reason. The Atlas shows every set with how many of your cards it holds. Basic lands spread over the set's different arts. A deck-list line like `1 Sol Ring (CMM) 410` is honored unless you turn that off.
+- **Vault / Budget**: the most (or least) expensive *art variant* (one painting in one treatment, not a foil copy) of every card, from Scryfall's daily TCGplayer / Cardmarket prices; the card shows price, finish, provider and date. Serialized and oversized cards are left out unless you count them.
+- Any card can be switched in its **Loupe** (click it): a filmstrip of every art variant, "Hang this one", or back to AI art. A hand-picked card is never moved by a re-resolve.
+- Official cards print as the whole scan (centred, not stretched, corners squared in the border colour, a small "PROXY | not for sale" line) or as the art inside one of your frames (with the artist credited).
+- **Print-shop ZIP**: 822 x 1122 px pictures with 1/8 in bleed, named `001 Sol Ring [CMM 410].png`.
+- Import: paste text, an Archidekt link, or drop a `.txt` / `.dek` / `.csv` file.
+
+Data: `G:\proxy-forge-data\scryfall\printings.sqlite` (every printing, ~110k, built from Scryfall's `default_cards` in about 20 s; the Source step offers to build it), `scans\` (every official image, kept). Code: `printings.py`, `treatments.py`, `resolver.py`, `vault.py`, `scans.py`, `importers.py`. Network work (index, scans) runs on its own worker, so it never waits behind a LoRA training. Prices are from the index only (Scryfall); MTGJSON and JustTCG as second opinions are not built.

@@ -25,7 +25,7 @@ from .scryfall import HEADERS, SEPARATE_FACES
 log = logging.getLogger("scans")
 W, H = 750, 1050
 KINDS = {"png": "png", "normal": "jpg", "art_crop": "jpg"}
-MARK = "PROXY  ·  not for sale"
+MARK = "PROXY  |  not for sale"
 
 
 def scan_dir() -> Path:

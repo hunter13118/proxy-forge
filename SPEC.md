@@ -101,3 +101,7 @@ prompts, templates, profiles and people. The table above is the history; what ea
 | GPU sharing | the studio (one worker, its picture lock, `make_room`) |
 | Sign-in | still `studio-kit` (`web_auth`, `clerk_auth`) |
 
+
+## Update 2026-11-13: official art (Archive / Vault)
+
+Built from the feature plan (art sources): printings index, set-locked Archive, Vault/Budget ranking, official-scan rendering, bleed export, importers, and the "Gallery" page (Deck, Source, Gallery, Press; Loupe per card). Deviations from the plan: no `ijson` (Scryfall's bulk files are gzipped JSON Lines now, read line by line); prices come from Scryfall only (no MTGJSON / JustTCG, so no cross-provider median or thin-market guard yet); no MPC Autofill or 2x upscale (M6 not started); the Loupe has no side-by-side Compare. Open questions 1-3 keep the plan's defaults (proxy line on scans, official scan by default, USD / foil on / serialized off).
