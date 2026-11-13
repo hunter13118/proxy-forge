@@ -6,14 +6,14 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 from studio_kit import web_auth
 
-from . import config, export, lora_train, render, resolver, scans, store, vault
+from . import config, export, importers, lora_train, render, resolver, scans, store, vault
 from .studio import StudioError
 from .engine import Engine, art_path, card_png, card_thumb, safe
 
@@ -378,8 +378,11 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
         return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{safe(d["name"])}-{paper}.pdf"'})
 
     @app.get("/api/decks/{did}/export.zip")
-    def export_zip(did: str, copies: bool = False):
+    def export_zip(did: str, copies: bool = False, bleed: bool = False):
         d = _need(store.get_deck(did), "no such deck")
+        if bleed:
+            from .engine import print_shop_images
+            return Response(export.zip_images(print_shop_images(eng, did, copies)), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{safe(d["name"])}-print-shop.zip"'})
         return Response(export.zip_bytes(eng.card_images(did, copies)), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{safe(d["name"])}.zip"'})
 
     # -------------------------------------------------------------------------------------------------------------------------------------------------------- jobs
@@ -493,6 +496,20 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
             return FileResponse(scans.fetch(p, face, "normal", eng.scan_transport), media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
         except Exception as e:
             raise HTTPException(404, str(e))
+
+    @app.post("/api/import")
+    async def import_deck_text(file: UploadFile | None = File(None), url: str = Form("")):
+        """A file (.txt, .dek, .csv, MTGA) or an Archidekt link, turned into deck-list text."""
+        try:
+            if file is not None:
+                text, warnings = importers.from_file(file.filename or "", await file.read())
+                return {"text": text, "source": file.filename, "warnings": warnings}
+            if url.strip():
+                text, warnings = importers.from_archidekt(url.strip())
+                return {"text": text, "source": "Archidekt", "warnings": warnings}
+        except importers.ImportError_ as e:
+            raise HTTPException(400, str(e))
+        raise HTTPException(400, "give a file or a link")
 
     @app.get("/health")
     def health():

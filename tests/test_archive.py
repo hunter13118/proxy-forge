@@ -294,3 +294,56 @@ def test_api_routes(env):
     assert c.put(f"/api/decks/{did}/art-policy", json={"source": "archive", "sets": ["mh3"]}).json()["job"]["queue"] == "net"
     assert c.get(f"/api/decks/{did}/appraisal").json()["total"] == 0
     assert c.get("/api/status").json()["printings"] > 0 or True
+
+
+def test_bleed_is_822x1122_and_the_card_is_untouched():
+    from proxy_forge import export
+    card = Image.new("RGB", (750, 1050), (30, 30, 30))
+    card.paste((200, 40, 40), (100, 100, 650, 600))
+    out = export.with_bleed(card)
+    assert out.size == (822, 1122)
+    assert out.crop((36, 36, 786, 1086)).tobytes() == card.tobytes()                    # the card itself is not resampled
+    assert out.getpixel((2, 2)) == (30, 30, 30) and out.getpixel((820, 1100)) == (30, 30, 30)       # bordered: the border runs on
+    art = Image.new("RGB", (750, 1050))
+    for x in range(750):
+        art.paste((x % 256, 90, 10), (x, 0, x + 1, 1050))
+    m = export.with_bleed(art, mirror=True)
+    assert m.size == (822, 1122) and m.getpixel((35, 500)) == art.getpixel((0, 500)) and m.getpixel((0, 500)) == art.getpixel((35, 500))      # borderless: the art is mirrored outward
+
+
+def test_print_shop_zip_names_carry_provenance(env):
+    import zipfile
+
+    from proxy_forge.engine import print_shop_images
+    from proxy_forge import export
+    eng, _ = env
+    did = make_deck(eng, unit("Ragavan", "o-ragavan", copies=2))
+    eng._apply(Job("art", did, "net"), did, pol())
+    imgs = print_shop_images(eng, did, True)
+    assert [n for n, _ in imgs] == ["001 Ragavan [MH3 138].png", "002 Ragavan [MH3 138].png"] and imgs[0][1].size == (822, 1122)
+    z = zipfile.ZipFile(io.BytesIO(export.zip_images(imgs)))
+    assert len(z.namelist()) == 2
+
+
+def test_importers_files_and_archidekt():
+    from proxy_forge import deck, importers
+    dek = b'<?xml version="1.0"?><Deck><Cards CatID="1" Quantity="4" Sideboard="false" Name="Lightning Bolt"/><Cards CatID="2" Quantity="2" Sideboard="true" Name="Negate"/></Deck>'
+    text, _ = importers.from_file("x.dek", dek)
+    es = {(e.name, e.section): e.qty for e in deck.parse(text)}
+    assert es == {("Lightning Bolt", "main"): 4, ("Negate", "sideboard"): 2}
+    csv_ = b"Count,Name,Edition,Collector Number\n1,Sol Ring,cmm,410\n3,Island,,\n"
+    es = {e.name: (e.qty, e.set, e.number) for e in deck.parse(importers.from_file("d.csv", csv_)[0])}
+    assert es == {"Sol Ring": (1, "cmm", "410"), "Island": (3, "", "")}
+    arena = b"Deck\n4 Lightning Bolt (M10) 146\n"
+    assert importers.from_file("a.txt", arena)[1]
+    payload = {"cards": [{"quantity": 1, "categories": ["Commander"], "card": {"oracleCard": {"name": "Atraxa"}, "edition": {"editioncode": "c16"}, "collectorNumber": "28"}},
+                         {"quantity": 2, "categories": ["Land"], "card": {"oracleCard": {"name": "Island"}, "edition": {"editioncode": "cmm"}, "collectorNumber": "440"}},
+                         {"quantity": 1, "categories": ["Maybeboard"], "card": {"oracleCard": {"name": "Nope"}}}]}
+    tr = httpx.MockTransport(lambda r: httpx.Response(200, json=payload) if r.url.path == "/api/decks/123/" else httpx.Response(404))
+    text, warn = importers.from_archidekt("https://archidekt.com/decks/123/my-deck", tr)
+    es = {(e.name, e.section): (e.qty, e.set) for e in deck.parse(text)}
+    assert es == {("Atraxa", "commander"): (1, "c16"), ("Island", "main"): (2, "cmm")} and warn
+    with pytest.raises(importers.ImportError_):
+        importers.from_archidekt("https://example.com/x")
+    with pytest.raises(importers.ImportError_):
+        importers.from_archidekt("https://archidekt.com/decks/9/x", tr)

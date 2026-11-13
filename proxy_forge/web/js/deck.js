@@ -47,7 +47,17 @@ export function deckNotes() {
   $("deck-notes").replaceChildren(`${d.order.length} cards hung. `, d.missing && d.missing.length ? h("b", {}, `Not found: ${d.missing.join(", ")}. `) : "");
 }
 
+async function viaImporter(form) {
+  const r = await api("/api/import", { method: "POST", form });
+  $("deck-text").value = r.text; showLedger();
+  toast(`Read ${r.source}.` + (r.warnings.length ? " " + r.warnings.join(" ") : ""));
+}
+
 async function importDeck() {
+  if (/^https?:\/\/\S+$/.test($("deck-text").value.trim())) {                    // a link: Archidekt
+    const f = new FormData(); f.append("url", $("deck-text").value.trim());
+    try { await viaImporter(f); } catch (e) { return fail(e); }
+  }
   const text = $("deck-text").value.trim();
   if (!text) return toast("Paste a deck list first.", "bad");
   $("deck-import").disabled = true;
@@ -72,7 +82,8 @@ export function wireDeck() {
     const f = e.dataTransfer?.files?.[0];
     if (!f) return;
     e.preventDefault();
-    $("deck-text").value = await f.text();
+    if (/\.(dek|csv)$/i.test(f.name)) { const fd = new FormData(); fd.append("file", f); try { await viaImporter(fd); } catch (err) { fail(err); } }
+    else $("deck-text").value = await f.text();
     if (!$("deck-name").value || $("deck-name").value === "My deck") $("deck-name").value = f.name.replace(/\.[^.]+$/, "");
     showLedger();
   });

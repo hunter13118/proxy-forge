@@ -429,6 +429,22 @@ class Engine:
         return out
 
 
+def print_shop_images(eng: "Engine", did: str, copies: bool) -> list[tuple[str, Image.Image]]:
+    """822x1122 pictures with 1/8 in bleed, named with where each card's art came from: `001 Sol Ring [CMM 410].png`."""
+    deck = store.get_deck(did)
+    out = []
+    for k in deck["order"]:
+        u = deck["units"][k]
+        p = u.get("printing") or {}
+        tag = f" [{p['set'].upper()} {p['cn']}]" if p else " [AI]"
+        full = "borderless" in p.get("treatment", "") or "fullart" in p.get("treatment", "") or (u.get("art_source", "forge") == "forge" and render.get_template(deck["template"]).get("style") == "fullart")
+        with Image.open(eng.ensure_card(did, k)) as im:
+            bled = export.with_bleed(im, mirror=full)
+        for _ in range(u["copies"] if copies else 1):
+            out.append((f"{len(out) + 1:03d} {render_safe(u['name'])}{tag}.png".replace("/", "-"), bled))
+    return out
+
+
 def render_safe(name: str) -> str:
     return "".join(c for c in name if c.isalnum() or c in " -_'").strip()[:60]
 

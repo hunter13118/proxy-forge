@@ -125,3 +125,39 @@ def zip_bytes(named: list[tuple[str, Path]]) -> bytes:
         for name, p in named:
             z.write(p, name)
     return buf.getvalue()
+
+
+BLEED_PX = 36                                                          # 1/8 in at 300 dpi: what print shops (MPC and others) ask for
+
+
+def with_bleed(card: Image.Image, px: int = BLEED_PX, mirror: bool = False) -> Image.Image:
+    """The card on a canvas `px` larger on every side (750x1050 -> 822x1122). Bordered cards: the border colour runs on past the cut line. Borderless and full-art cards (`mirror`): the
+    outer `px` of the picture is mirrored outward, so the art continues through the cut and no thin edge shows after trimming."""
+    from PIL import ImageOps
+    w, h = card.size
+    card = card.convert("RGB")
+    if mirror:
+        out = Image.new("RGB", (w + 2 * px, h + 2 * px))
+        out.paste(card, (px, px))
+        out.paste(ImageOps.mirror(card.crop((0, 0, px, h))), (0, px))
+        out.paste(ImageOps.mirror(card.crop((w - px, 0, w, h))), (w + px, px))
+        out.paste(ImageOps.flip(card.crop((0, 0, w, px))), (px, 0))
+        out.paste(ImageOps.flip(card.crop((0, h - px, w, h))), (px, h + px))
+        for cx, cy, box in ((0, 0, (0, 0, px, px)), (w + px, 0, (w - px, 0, w, px)), (0, h + px, (0, h - px, px, h)), (w + px, h + px, (w - px, h - px, w, h))):
+            out.paste(ImageOps.flip(ImageOps.mirror(card.crop(box))), (cx, cy))
+        return out
+    ring = [card.getpixel((x, y)) for x in range(8, w - 8, 12) for y in (3, 6, h - 4, h - 7)] + [card.getpixel((x, y)) for y in range(8, h - 8, 12) for x in (3, 6, w - 4, w - 7)]
+    colour = tuple(sorted(c[i] for c in ring)[len(ring) // 2] for i in range(3))
+    out = Image.new("RGB", (w + 2 * px, h + 2 * px), colour)
+    out.paste(card, (px, px))
+    return out
+
+
+def zip_images(named: list[tuple[str, Image.Image]]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+        for name, im in named:
+            b = io.BytesIO()
+            im.save(b, "PNG", dpi=(300, 300))
+            z.writestr(name, b.getvalue())
+    return buf.getvalue()
