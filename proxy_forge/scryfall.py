@@ -7,6 +7,7 @@ a typo) goes to /cards/named?fuzzy= once, politely (a User-Agent, an Accept head
 """
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import sqlite3
@@ -84,16 +85,23 @@ class Scryfall:
             return self.count()
         with httpx.Client(timeout=120, follow_redirects=True) as c:
             info = next(b for b in self._get(c, f"{API}/bulk-data").json()["data"] if b["type"] == "oracle_cards")
-            progress(f"downloading Scryfall oracle cards ({info.get('size', 0) // 1_000_000} MB)")
-            tmp = self.path.with_suffix(".json.part")
-            with c.stream("GET", info["download_uri"], headers=HEADERS) as r:
+            # Scryfall now publishes gzipped JSON Lines (`jsonl_download_uri`); the old plain-JSON `download_uri` is still taken when present.
+            url = info.get("jsonl_download_uri") or info["download_uri"]
+            size = info.get("compressed_size") or info.get("size") or 0
+            progress(f"downloading Scryfall oracle cards ({size // 1_000_000} MB)")
+            tmp = self.path.with_suffix(".bulk.part")
+            with c.stream("GET", url, headers=HEADERS) as r:
                 r.raise_for_status()
                 with open(tmp, "wb") as f:
                     for chunk in r.iter_bytes(1 << 20):
                         f.write(chunk)
         progress("indexing")
-        cards = json.loads(tmp.read_text(encoding="utf-8"))
+        raw = tmp.read_bytes()
         tmp.unlink(missing_ok=True)
+        if raw[:2] == b"\x1f\x8b":
+            raw = gzip.decompress(raw)
+        text = raw.decode("utf-8")
+        cards = json.loads(text) if text.lstrip().startswith("[") else [json.loads(line) for line in text.splitlines() if line.strip()]
         rows = {}
         for card in cards:
             if card.get("layout") in ("token", "emblem", "art_series", "vanguard", "scheme", "planar") or card.get("set_type") in ("token", "memorabilia"):
