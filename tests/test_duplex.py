@@ -28,10 +28,11 @@ def mean_diff(a, b):
 
 @pytest.mark.parametrize("flip", ["long", "short"])
 @pytest.mark.parametrize("turn", ["never", "always"])
-def test_every_back_lies_exactly_behind_its_front(tmp_path, flip, turn):
+@pytest.mark.parametrize("paper", ["a4", "letter"])
+def test_every_back_lies_exactly_behind_its_front(tmp_path, flip, turn, paper):
     ps = pairs(tmp_path, 9)
-    fronts, backs_ = export.duplex_pages(ps, "a4", turn=turn, flip=flip, marks=False)
-    lay = export.best_layout("a4", turn=turn)
+    fronts, backs_ = export.duplex_pages(ps, paper, turn=turn, flip=flip, marks=False)
+    lay = export.best_layout(paper, turn=turn)
     physical = ImageOps.mirror(backs_[0]) if flip == "long" else ImageOps.flip(backs_[0])          # the sheet turned over: what shows through from the front
     angle = 90 if lay.turned else 0
     cw, ch = (lay.card[1], lay.card[0]) if lay.turned else lay.card
