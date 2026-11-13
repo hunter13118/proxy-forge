@@ -161,3 +161,115 @@ def zip_images(named: list[tuple[str, Image.Image]]) -> bytes:
             im.save(b, "PNG", dpi=(300, 300))
             z.writestr(name, b.getvalue())
     return buf.getvalue()
+
+
+# ------------------------------------------------------------------------------------------------------------------------------------------------------- two-sided printing
+#
+# The one rule: a back must sit exactly behind its front. Flipping the sheet mirrors it, so on the back page a card's slot is the front slot mirrored across the flip axis, and the
+# back picture is turned so that its top edge is the same physical edge as the front's:
+#   flip on the LONG edge (like turning a book page; portrait paper): columns mirror, left <-> right. An upright front -> an upright back; a front turned 90 (top edge to the page's left) -> back
+#                                                                      turned the other way (top edge to the page's right).
+#   flip on the SHORT edge (like a notepad flipped up): rows mirror, top <-> bottom. An upright front -> a back turned 180; a turned front -> a back turned the same way.
+# Pages are "as read": the printer's duplex setting (or you, turning the sheet over) does the physical flip, so the PDF does not mirror pictures, it only moves and turns them.
+
+FLIPS = ("long", "short")
+
+
+def back_cell(lay: Layout, n: int, flip: str, dx: int = 0, dy: int = 0) -> tuple[int, int]:
+    """Where the back of the card in front slot `n` goes: the front slot mirrored across the flip axis, plus the owner's alignment shift (px)."""
+    x, y = lay.cell(n)
+    w, h = lay.card
+    pw, ph = lay.page
+    return ((pw - x - w, y) if flip == "long" else (x, ph - y - h))[0] + dx, ((pw - x - w, y) if flip == "long" else (x, ph - y - h))[1] + dy
+
+
+def back_angle(lay: Layout, flip: str) -> int:
+    """PIL rotation (counter-clockwise degrees) of an upright back picture so its top edge lines up with the front's top edge after the flip."""
+    if flip == "long":
+        return 270 if lay.turned else 0
+    return 90 if lay.turned else 180
+
+
+def duplex_pages(pairs: list[tuple[Path, Path | None]], paper: str = "a4", size: str = "mtg", margin_mm: float = 5.0, gap_mm: float = 0.0, turn: str = "auto", marks: bool = True,
+                 flip: str = "long", dx_mm: float = 0.0, dy_mm: float = 0.0) -> tuple[list[Image.Image], list[Image.Image]]:
+    """(front pages, back pages), page i of each belonging to the same sheet. `pairs` is (front picture, back picture or None)."""
+    if flip not in FLIPS:
+        raise ValueError("flip must be long or short")
+    lay = best_layout(paper, size, margin_mm, gap_mm, turn)
+    cw, ch = (lay.card[1], lay.card[0]) if lay.turned else lay.card
+    dx, dy = _px(dx_mm), _px(dy_mm)
+    cache: dict = {}
+
+    def get(p: Path, angle: int) -> Image.Image:
+        if (p, angle) not in cache:
+            with Image.open(p) as im:
+                c = im.convert("RGB")
+                c = c if c.size == (cw, ch) else c.resize((cw, ch), Image.LANCZOS)
+                cache[(p, angle)] = c.rotate(angle, expand=True) if angle else c
+        return cache[(p, angle)]
+    fronts, backs = [], []
+    for start in range(0, len(pairs), lay.per_page):
+        fp, bp = Image.new("RGB", lay.page, "white"), Image.new("RGB", lay.page, "white")
+        for n, (front, back) in enumerate(pairs[start:start + lay.per_page]):
+            fp.paste(get(front, 90 if lay.turned else 0), lay.cell(n))
+            if back is not None:
+                bp.paste(get(back, back_angle(lay, flip)), back_cell(lay, n, flip, dx, dy))
+        if marks:
+            _cut_marks(ImageDraw.Draw(fp), lay)
+        fronts.append(fp)
+        backs.append(bp)
+    return fronts, backs
+
+
+def duplex_order(fronts: list[Image.Image], backs: list[Image.Image], mode: str, part: str = "all", reverse_backs: bool = False) -> list[Image.Image]:
+    """The page order of the PDF.
+    auto   : front 1, back 1, front 2, back 2 ...  (the printer prints both sides of each sheet itself: set 2-sided printing to the same flip edge)
+    manual : all fronts, then all backs  (print the fronts, put the stack back in, print the backs; `reverse_backs` for printers that stack their output in the opposite order)
+    `part` (manual only) gives just the fronts or just the backs, to save as two PDFs."""
+    if mode == "auto":
+        return [p for pair in zip(fronts, backs) for p in pair]
+    if mode != "manual":
+        return fronts
+    b = backs[::-1] if reverse_backs else backs
+    return fronts if part == "fronts" else b if part == "backs" else fronts + b
+
+
+def pages_pdf(pages: list[Image.Image]) -> bytes:
+    if not pages:
+        raise ValueError("no cards to print")
+    buf = io.BytesIO()
+    pages[0].save(buf, "PDF", resolution=float(DPI), quality=95, subsampling=0, save_all=True, append_images=pages[1:])
+    return buf.getvalue()
+
+
+def test_sheets(paper: str = "a4", size: str = "mtg", margin_mm: float = 5.0, turn: str = "auto", flip: str = "long", dx_mm: float = 0.0, dy_mm: float = 0.0) -> list[Image.Image]:
+    """Two pages for checking a printer before printing a deck: slot numbers and a TOP arrow on the front, the same on the back where each back belongs (mirrored slot, turned to match),
+    and a cross at the centre of every slot on both sides. Print both sides, hold the sheet to a window: the crosses must coincide and the numbers must read the same way up."""
+    from . import render
+    lay = best_layout(paper, size, margin_mm, 0.0, turn)
+    cw, ch = lay.card
+    big, small = render.font({}, "title", 120), render.font({}, "body", 34)
+
+    def card(n: int, side: str) -> Image.Image:
+        c = Image.new("RGB", (750, 1050), "white" if side == "front" else "#eef3ff")
+        d = ImageDraw.Draw(c)
+        d.rectangle((6, 6, 743, 1043), outline="black", width=4)
+        d.text((375, 130), "TOP", font=big, fill="black", anchor="mm")
+        d.polygon([(375, 20), (320, 100), (430, 100)], fill="black")
+        d.text((375, 525), str(n + 1), font=render.font({}, "title", 300), fill="#bbb", anchor="mm")
+        d.line((335, 525, 415, 525), fill="red", width=5)
+        d.line((375, 485, 375, 565), fill="red", width=5)
+        d.text((375, 930), side.upper(), font=big, fill="black" if side == "front" else "#2a4fb0", anchor="mm")
+        d.text((375, 1000), f"slot {n + 1} · {paper.upper()} · flip on the {flip} edge", font=small, fill="#555", anchor="mm")
+        return c
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        pairs = []
+        for n in range(lay.per_page):
+            f, b = Path(td) / f"f{n}.png", Path(td) / f"b{n}.png"
+            card(n, "front").save(f)
+            card(n, "back").save(b)
+            pairs.append((f, b))
+        fronts, backs = duplex_pages(pairs, paper, size, margin_mm, 0.0, turn, True, flip, dx_mm, dy_mm)
+        fronts[0].load(); backs[0].load()
+    return [fronts[0], backs[0]]

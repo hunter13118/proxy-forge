@@ -13,7 +13,7 @@ from PIL import Image
 from pydantic import BaseModel
 from studio_kit import web_auth
 
-from . import config, export, importers, lora_train, render, resolver, scans, store, vault
+from . import backs, config, export, importers, lora_train, render, resolver, scans, store, vault
 from .studio import StudioError
 from .engine import Engine, art_path, card_png, card_thumb, safe
 
@@ -53,6 +53,14 @@ class ArtPolicyIn(BaseModel):
 
 class PrintingIn(BaseModel):
     printing_id: str | None = None
+
+
+class BackIn(BaseModel):
+    mode: str | None = None                 # none | mtg | funny | custom | ai
+    funny: str | None = None
+    dfc: bool | None = None
+    prompt: str | None = None
+    seed: int | None = None
 
 
 class DeckPatch(BaseModel):
@@ -364,10 +372,27 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
         return FileResponse(art_path(u["art"]), media_type="image/png")
 
     @app.get("/api/decks/{did}/export.pdf")
-    def export_pdf(did: str, paper: str = "letter", copies: bool = True, size: str = "mtg", margin: float = 5.0, gap: float = 0.0, turn: str = "auto", marks: bool = True, skip_basics: bool = False):
+    def export_pdf(did: str, paper: str = "letter", copies: bool = True, size: str = "mtg", margin: float = 5.0, gap: float = 0.0, turn: str = "auto", marks: bool = True, skip_basics: bool = False,
+                   duplex: str = "none", flip: str = "long", part: str = "all", reverse_backs: bool = False, back_dx: float = 0.0, back_dy: float = 0.0):
         d = _need(store.get_deck(did), "no such deck")
         if paper not in export.PAPER or size not in export.CARD_MM or turn not in ("auto", "never", "always") or not 0 <= margin <= 30 or not 0 <= gap <= 20:
             raise HTTPException(400, "bad print options")
+        if duplex not in ("none", "auto", "manual") or flip not in export.FLIPS or part not in ("all", "fronts", "backs") or not -5 <= back_dx <= 5 or not -5 <= back_dy <= 5:
+            raise HTTPException(400, "bad two-sided options")
+        name = safe(d["name"])
+        if duplex != "none":
+            pairs = eng.print_pairs(did, copies, skip_basics, duplex=True)
+            if not pairs:
+                raise HTTPException(400, "no cards")
+            if not any(b for _, b in pairs):
+                raise HTTPException(400, "this deck has no back yet: choose one in the Source step (Card backs)")
+            try:
+                f, b = export.duplex_pages(pairs, paper, size, margin, gap, turn, marks, flip, back_dx, back_dy)
+                pdf = export.pages_pdf(export.duplex_order(f, b, duplex, part, reverse_backs))
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            tag = f"-{duplex}" + (f"-{part}" if duplex == "manual" and part != "all" else "")
+            return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}-{paper}{tag}.pdf"'})
         imgs = [p for _, p in eng.card_images(did, copies, skip_basics)]
         if not imgs:
             raise HTTPException(400, "no cards")
@@ -375,7 +400,76 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
             pdf = export.pdf_bytes(imgs, paper, size=size, margin_mm=margin, gap_mm=gap, turn=turn, marks=marks)
         except ValueError as e:
             raise HTTPException(400, str(e))
-        return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{safe(d["name"])}-{paper}.pdf"'})
+        return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}-{paper}.pdf"'})
+
+    @app.get("/api/duplex-test.pdf")
+    def duplex_test(paper: str = "a4", size: str = "mtg", flip: str = "long", turn: str = "auto", margin: float = 5.0, back_dx: float = 0.0, back_dy: float = 0.0):
+        """Two pages for checking a printer: print both sides, hold it to the light."""
+        if paper not in export.PAPER or flip not in export.FLIPS or turn not in ("auto", "never", "always") or size not in export.CARD_MM:
+            raise HTTPException(400, "bad options")
+        return Response(export.pages_pdf(export.test_sheets(paper, size, margin, turn, flip, back_dx, back_dy)), media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="duplex-test-{paper}-{flip}.pdf"'})
+
+    # ----------------------------------------------------------------------------------------------------------------------------------------------------------- card backs
+    @app.get("/api/backs")
+    def back_list():
+        return [{"id": "mtg", "name": "Magic card back", "blurb": "The official back, from Scryfall."}, *backs.FUNNY]
+
+    @app.get("/api/backs/{bid}.jpg")
+    def back_preview(bid: str):
+        try:
+            im = backs.official(eng.scan_transport) if bid == "mtg" else backs.funny(bid)
+        except KeyError:
+            raise HTTPException(404, "no such back")
+        except Exception as e:
+            raise HTTPException(502, str(e))
+        buf = io.BytesIO()
+        im.resize((250, 350), Image.LANCZOS).save(buf, "JPEG", quality=88)
+        return Response(buf.getvalue(), media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.put("/api/decks/{did}/back")
+    def deck_back(did: str, b: BackIn):
+        d = _need(store.get_deck(did), "no such deck")
+        f = b.model_dump(exclude_none=True)
+        if f.get("mode") not in (None, "none", "mtg", "funny", "custom", "ai"):
+            raise HTTPException(400, "mode must be none, mtg, funny, custom or ai")
+        if f.get("funny") and f["funny"] not in {x["id"] for x in backs.FUNNY}:
+            raise HTTPException(400, "no such funny back")
+        if f.get("mode") == "custom" and not (store.deck_dir(did) / "back-custom.png").exists():
+            raise HTTPException(400, "upload a picture for the back first")
+        if f.get("mode") == "ai" and not eng.back_cfg(d)["art"]:
+            raise HTTPException(400, "draw the AI back first (Draw an AI back)")
+        return {"job": eng.set_back(did, f).public()}
+
+    @app.post("/api/decks/{did}/back/draw")
+    def deck_back_draw(did: str, b: BackIn):
+        _need(store.get_deck(did), "no such deck")
+        if b.seed is not None:
+            store.update_deck(did, lambda d: d.update(back={**eng.back_cfg(d), "seed": b.seed}))
+        return {"job": eng.draw_back(did, b.prompt).public()}
+
+    @app.post("/api/decks/{did}/back/custom")
+    async def deck_back_custom(did: str, file: UploadFile = File(...)):
+        _need(store.get_deck(did), "no such deck")
+        try:
+            im = Image.open(io.BytesIO(await file.read()))
+            im.load()
+        except Exception:
+            raise HTTPException(400, "that is not a picture I can read")
+        out = store.deck_dir(did) / "back-custom.png"
+        backs.cover(im).save(out, "PNG")
+        return {"job": eng.set_back(did, {"mode": "custom"}).public()}
+
+    @app.get("/api/decks/{did}/back.jpg")
+    def deck_back_image(did: str):
+        _need(store.get_deck(did), "no such deck")
+        p = eng.back_path(did)
+        if not p.exists():
+            raise HTTPException(404, "no back")
+        buf = io.BytesIO()
+        with Image.open(p) as im:
+            im.convert("RGB").resize((360, 504), Image.LANCZOS).save(buf, "JPEG", quality=88)
+        return Response(buf.getvalue(), media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
 
     @app.get("/api/decks/{did}/export.zip")
     def export_zip(did: str, copies: bool = False, bleed: bool = False):

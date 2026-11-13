@@ -18,7 +18,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import config, deck as decklist, export, lora_train, prompts, references, render, resolver, scans, store
+from . import backs, config, deck as decklist, export, lora_train, prompts, references, render, resolver, scans, store
 from .printings import Printings
 from .scryfall import Scryfall, units as card_units
 from .studio import Cancelled, Studio
@@ -369,6 +369,95 @@ class Engine:
             job.done = job.total = 1
             job.msg = "hung"
         return self.submit("pin", did, run, queue="net")
+
+    # ------------------------------------------------------------------------------------------------------------------------------------------------------------ backs
+    def back_cfg(self, deck: dict) -> dict:
+        return {"mode": "none", "funny": "swirl", "dfc": True, "prompt": "", "seed": 1, "art": "", **(deck.get("back") or {})}
+
+    def back_path(self, did: str) -> Path:
+        return store.deck_dir(did) / "back.png"
+
+    def render_back(self, did: str) -> Path | None:
+        """Draw the deck's back (750x1050) from its settings and keep it as `back.png`; None when the deck has no back."""
+        cfg = self.back_cfg(store.get_deck(did))
+        out = self.back_path(did)
+        mode = cfg["mode"]
+        if mode == "none":
+            out.unlink(missing_ok=True)
+            return None
+        if mode == "mtg":
+            im = backs.official(self.scan_transport)
+        elif mode == "funny":
+            im = backs.funny(cfg["funny"])
+        elif mode == "custom":
+            f = store.deck_dir(did) / "back-custom.png"
+            if not f.exists():
+                raise RuntimeError("upload a picture for the back first")
+            with Image.open(f) as src:
+                im = backs.cover(src)
+        elif mode == "ai":
+            if not cfg["art"] or not art_path(cfg["art"]).exists():
+                raise RuntimeError("draw the AI back first")
+            with Image.open(art_path(cfg["art"])) as src:
+                im = backs.ai_frame(src.convert("RGB"))
+        else:
+            raise RuntimeError(f"unknown back {mode!r}")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        im.save(out, "PNG")
+        return out
+
+    def set_back(self, did: str, cfg: dict) -> Job:
+        def run(job: Job):
+            store.update_deck(did, lambda d: d.update(back={**self.back_cfg(d), **cfg}))
+            job.msg = "preparing the back"
+            self.render_back(did)
+            job.done = job.total = 1
+            job.msg = "back ready"
+        return self.submit("back", did, run, queue="net")
+
+    def draw_back(self, did: str, prompt: str | None = None) -> Job:
+        """Draw the AI back with the studio (same style and LoRA as the deck), then frame it."""
+        def run(job: Job):
+            deck = store.get_deck(did)
+            cfg = self.back_cfg(deck)
+            profile = store.get_profile(deck["profile"]) if deck.get("profile") else None
+            profile = profile or {"direction": "", "subjects": [], "lora": "", "lora_strength": 0.8}
+            scene = (prompt if prompt is not None else cfg["prompt"]).strip() or "ornate trading card back design, symmetrical, intricate decorative border, a glowing emblem in the centre, no text"
+            text = prompts.compose(scene, subjects=[], direction=profile.get("direction", ""), shape="portrait")
+            job.total, job.msg = 1, "drawing the back"
+            why = self.studio.reachable()
+            if why:
+                raise RuntimeError(why)
+            width, height = config.SIZES["portrait"]
+            art = self._draw(job, {"prompt": text, "seed": int(cfg["seed"])}, profile, width, height, True, [])
+            store.update_deck(did, lambda d: d.update(back={**self.back_cfg(d), "mode": "ai", "art": art, "prompt": scene}))
+            self.render_back(did)
+            job.done, job.msg = 1, "back drawn"
+        return self.submit("back-draw", did, run)
+
+    def print_pairs(self, did: str, copies: bool = True, skip_basics: bool = False, duplex: bool = False) -> list[tuple[Path, Path | None]]:
+        """(front, back) for each card in print order. A double-faced card's other face is its back when the deck's `dfc` setting is on (its second face is then not a card of its own);
+        every other card gets the deck's back, if it has one."""
+        deck = store.get_deck(did)
+        cfg = self.back_cfg(deck)
+        shared = self.render_back(did) if duplex and cfg["mode"] != "none" else None
+        out: list[tuple[Path, Path | None]] = []
+        for k in deck["order"]:
+            u = deck["units"][k]
+            if skip_basics and export.is_basic_land(u["name"]):
+                continue
+            back = shared
+            if duplex and cfg["dfc"] and u.get("faces", 1) > 1:
+                base = k.rsplit("-", 1)[0]
+                sibling = f"{base}-1"
+                if u.get("face", 0) == 0 and sibling in deck["units"]:
+                    back = self.ensure_card(did, sibling)
+                elif u.get("face", 0) == 1 and f"{base}-0" in deck["units"] and f"{base}-0" in deck["order"]:
+                    continue                                                    # printed as the back of its front face
+            p = self.ensure_card(did, k)
+            for _ in range(u["copies"] if copies else 1):
+                out.append((p, back))
+        return out
 
     # --------------------------------------------------------------------------------------------------------------------------------------------------- rendering
     def render_unit(self, did: str, key: str) -> None:
