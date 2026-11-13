@@ -26,6 +26,13 @@ FUNNY = [
     {"id": "ink", "name": "Inkwell", "blurb": "Deep purple, a golden ink drop and stars: the look of a certain inky Disney game."},
     {"id": "duck", "name": "Rubber duck", "blurb": "Polka dots and a very serious duck."},
     {"id": "tax", "name": "Tax form", "blurb": "Schedule C. Your opponents will never look at the back of your deck again."},
+    {"id": "pizza", "name": "Pizza", "blurb": "A whole pizza. Pepperoni, naturally."},
+    {"id": "cat", "name": "Cat", "blurb": "A cat looking at you, unimpressed."},
+    {"id": "bat", "name": "Bat and moon", "blurb": "Spooky, in the friendliest possible way."},
+    {"id": "gears", "name": "Clockwork", "blurb": "Brass gears; nothing ticks quite right."},
+    {"id": "synth", "name": "Synthwave", "blurb": "A neon sunset over a grid, 1985."},
+    {"id": "d20", "name": "Twenty-sided", "blurb": "A big d20 on green felt."},
+    {"id": "circuit", "name": "Circuit board", "blurb": "Green traces, solder pads, suspiciously many resistors."},
 ]
 
 
@@ -156,9 +163,9 @@ def draw_tax() -> Image.Image:
     im = Image.new("RGB", (W * s, H * s), "#f3f0e4")
     d = ImageDraw.Draw(im)
     ink, green = "#2a2a2a", "#3b6b44"
-    d.rectangle((0, 0, W * s, 150 * s), fill=green)
-    d.text((40 * s, 50 * s), "FORM 1040-C", font=render.font({}, "title", 62 * s), fill="#f3f0e4")
-    d.text((40 * s, 112 * s), "Profit or Loss From Playing Cards", font=render.font({}, "body", 26 * s), fill="#dfe8d8")
+    d.rectangle((0, 0, W * s, 170 * s), fill=green)
+    d.text((40 * s, 34 * s), "FORM 1040-C", font=render.font({}, "title", 62 * s), fill="#f3f0e4")
+    d.text((40 * s, 124 * s), "Profit or Loss From Playing Cards", font=render.font({}, "body", 26 * s), fill="#dfe8d8")
     for i in range(14):
         y = (190 + i * 58) * s
         d.line((40 * s, y, (W - 40) * s, y), fill="#b9b49f", width=2 * s)
@@ -170,6 +177,8 @@ def draw_tax() -> Image.Image:
 
 
 DRAW = {"swirl": draw_swirl, "ball": draw_ball, "eye": draw_eye, "ink": draw_ink, "duck": draw_duck, "tax": draw_tax}
+from . import backs_extra  # noqa: E402  (more designs; they use this module's helpers)
+DRAW.update(backs_extra.DRAW)
 
 
 def funny(bid: str) -> Image.Image:

@@ -48,6 +48,7 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-siz
 main { padding: 28px clamp(16px, 3vw, 44px) 120px; min-width: 0; max-width: 1500px; width: 100%; }
 .vhead { margin-bottom: 22px; }
 .vhead p { color: var(--mute); margin: 6px 0 0; max-width: 62ch; }
+.vhead a { color: var(--gilt2); }
 .vhead.split { display: flex; justify-content: space-between; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
 .view { animation: rise .35s ease both; }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
