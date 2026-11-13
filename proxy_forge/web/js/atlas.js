@@ -17,7 +17,7 @@ export function showDoor(name) {
 function syncButtons() {
   const d = S.deck, has = !!(d && d.order && d.order.length);
   $("gen").disabled = !has; $("regen").disabled = !has;
-  $("archive-go").disabled = !has || !chain.length;
+  $("archive-go").disabled = !has || !(chain.length || $("o-pins").checked);
   $("vault-go").disabled = !has;
 }
 
@@ -135,6 +135,7 @@ function renderChain() {
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------- wiring
 export function wireDoors(generate) {
   for (const b of document.querySelectorAll(".door")) b.onclick = () => { S.doorTouched = true; showDoor(b.dataset.door); };
+  $("o-pins").onchange = syncButtons;
   $("atlas-q").oninput = (e) => { q = e.target.value; shown = 60; if (S.coverage) renderAtlas(); };
   $("atlas-more").onclick = () => { shown += 90; renderAtlas(); };
   $("archive-go").onclick = () => apply("archive", `Hanging from ${chain.map((c) => c.toUpperCase()).join(" → ")}…`);

@@ -290,7 +290,7 @@ def test_api_routes(env):
     v = c.get(f"/api/decks/{did}/units/o-ragavan-0/printings").json()
     assert len(v["variants"]) == 4 and sum(x["current"] for x in v["variants"]) == 1
     assert c.get(f"/api/scans/{v['variants'][0]['best']}/0.jpg").status_code == 200
-    assert c.put(f"/api/decks/{did}/art-policy", json={"source": "archive", "sets": []}).status_code == 400
+    assert c.put(f"/api/decks/{did}/art-policy", json={"source": "archive", "sets": [], "pins": False}).status_code == 400
     assert c.put(f"/api/decks/{did}/art-policy", json={"source": "archive", "sets": ["mh3"]}).json()["job"]["queue"] == "net"
     assert c.get(f"/api/decks/{did}/appraisal").json()["total"] == 0
     assert c.get("/api/status").json()["printings"] > 0 or True
@@ -376,3 +376,16 @@ def test_one_card_pinned_to_several_printings_becomes_one_card_per_pin(pr):
     u2 = {**u, "copies": 12, "pins": [{"set": "mh3", "number": "300", "qty": 10}]}                      # 2 more copies without a pin follow the chain
     out = resolve_deck(pr, {"units": {u2["key"]: u2}, "order": [u2["key"]]}, pol(sets=["mh3"]))
     assert sum(out["units"][k]["copies"] for k in out["order"]) == 12 and len(out["order"]) == 2
+
+
+def test_a_stated_set_wins_for_vault_too_and_the_source_decides_the_rest(pr):
+    stated = {**unit("Ragavan", "o-ragavan"), "pin": {"set": "cmm", "number": "12"}, "pins": [{"set": "cmm", "number": "12", "qty": 1}]}
+    free = unit("Sol Ring", "o-sol-ring")
+    deck = {"units": {stated["key"]: stated, free["key"]: free}, "order": [stated["key"], free["key"]]}
+    out = resolve_deck(pr, deck, {**pol(sets=[]), "source": "vault"})["units"]
+    assert out[stated["key"]]["printing"]["set"] == "cmm" and out[stated["key"]]["printing"]["why"].startswith("pinned")
+    assert out[free["key"]]["printing"]["why"].startswith("priciest")                               # the secondary source
+    off = resolve_deck(pr, deck, {**pol(sets=[]), "source": "vault", "pins": False})["units"]
+    assert off[stated["key"]]["printing"]["why"].startswith("priciest")
+    only_pins = resolve_deck(pr, deck, pol(sets=[]))["units"]                                         # archive with no chain: stated sets, default printing for the rest
+    assert only_pins[stated["key"]]["printing"]["set"] == "cmm" and only_pins[free["key"]]["printing"]

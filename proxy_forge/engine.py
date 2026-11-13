@@ -488,7 +488,7 @@ def resolve_deck(pr: Printings, deck: dict, pol: dict) -> dict:
             for i, (x, n) in enumerate(groups):
                 sk = f"{k}#{chr(97 + i)}"
                 sub = {**u, "key": sk, "copies": n, "split_of": k, "pin": ({"set": x["set"], "number": x["number"]} if x["set"] else None), "pins": []}
-                r = resolver.resolve_unit(pr, sub, pol) if pol["source"] == "archive" or x["set"] else None
+                r = resolver.resolve_unit(pr, sub, pol) if x["set"] or pol["source"] == "archive" else None
                 if r is None and pol["source"] in ("vault", "budget"):
                     from . import vault
                     r = vault.pick(pr, sub, pol)
@@ -501,11 +501,13 @@ def resolve_deck(pr: Printings, deck: dict, pol: dict) -> dict:
             u["split"] = subs
             out_order.extend(subs)
             continue
-        if pol["source"] in ("vault", "budget"):
-            from . import vault
-            res = vault.pick(pr, u, pol)
-        else:
-            res = resolver.resolve_unit(pr, u, pol)
+        res = resolver.resolve_unit(pr, u, pol) if pol.get("pins", True) and (u.get("pin") or {}).get("set") else None      # a set stated in the deck list comes first, whatever the source
+        if res is None or not res.get("printing") or not res["why"].startswith("pinned"):
+            if pol["source"] in ("vault", "budget"):
+                from . import vault
+                res = vault.pick(pr, u, pol)
+            else:
+                res = res if res is not None else resolver.resolve_unit(pr, u, pol)
         if res.get("printing") is None:
             u.update(art_source="forge", printing=None, note=res["why"] + (" (pinned line not found)" if res.get("pin_missing") else ""))
             out_order.append(k)

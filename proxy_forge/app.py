@@ -446,8 +446,8 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
         pol = {**resolver.DEFAULT_POLICY, **b.model_dump(exclude_none=True)}
         if pol["source"] not in ("forge", "archive", "vault", "budget"):
             raise HTTPException(400, "source must be forge, archive, vault or budget")
-        if pol["source"] == "archive" and not pol["sets"]:
-            raise HTTPException(400, "pick at least one set for Archive")
+        if pol["source"] == "archive" and not pol["sets"] and not pol["pins"]:
+            raise HTTPException(400, "pick at least one set for Archive (or honor the sets stated in the deck list)")
         if pol["print"] not in ("scan", "template"):
             raise HTTPException(400, "print must be scan or template")
         return {"job": eng.apply_policy(did, pol).public()}

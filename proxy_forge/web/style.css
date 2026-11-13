@@ -114,6 +114,10 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .tile img { width: 100%; display: block; border-radius: 6px; }
 .tile.on { border-color: var(--gilt); box-shadow: 0 0 14px color-mix(in srgb, var(--gilt) 35%, transparent); }
 
+.pinbar { max-width: 900px; margin: 0 0 20px; padding: 14px 18px; border: 1px solid var(--gilt); border-radius: 14px; background: linear-gradient(135deg, color-mix(in srgb, var(--gilt) 10%, var(--panel)), var(--panel)); }
+.pinbar label { margin: 0; font-size: 15px; }
+.pinbar p { margin: 4px 0 0 26px; }
+
 /* the Atlas */
 .atlas-head { display: flex; gap: 20px; justify-content: space-between; flex-wrap: wrap; align-items: flex-end; }
 .atlas-tools { display: flex; flex-direction: column; gap: 8px; min-width: min(100%, 340px); }

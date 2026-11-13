@@ -50,6 +50,10 @@
     <!-- II. Source -->
     <section class="view" id="v-source" hidden>
       <header class="vhead"><h1>Three doors</h1><p>Where does each card's picture come from? Choose for the whole deck; change any single card later in the Loupe.</p></header>
+      <div class="pinbar">
+        <label class="check"><input id="o-pins" type="checkbox" checked> <b>Honor the set stated in the deck list</b></label>
+        <p class="desc">A line like <code>1 Sol Ring (CMM) 410</code> names its exact printing, so it is used as written, for Archive and Vault alike. The source you choose below is the <b>secondary</b> source: it only decides the cards whose line does not state a set. (AI art ignores this: Forge draws everything.)</p>
+      </div>
       <div class="doors" role="tablist">
         <button class="door" data-door="forge" role="tab"><div class="arch"><span class="glyph">✦</span></div><h3>Forge</h3><p>Draw new art with AI, in your style and with your people.</p></button>
         <button class="door" data-door="archive" role="tab"><div class="arch"><span class="glyph">❖</span></div><h3>Archive</h3><p>Official art from exactly the set you choose.</p></button>
@@ -115,7 +119,6 @@
           <label>Not in the chain<select id="o-fallback"><option value="nearest">nearest set in time</option><option value="default">default printing</option><option value="forge">AI art</option><option value="blank">leave it blank (AI)</option></select></label>
           <label>Print as<select id="o-print"><option value="scan">official scan, whole</option><option value="template">art in my frame</option></select></label>
           <label class="check"><input id="o-family" type="checkbox" checked> include the sets' promo &amp; bonus children</label>
-          <label class="check"><input id="o-pins" type="checkbox" checked> honor <code>(SET) 123</code> in the list</label>
           <label class="check"><input id="o-vary" type="checkbox" checked> vary the art of basic lands</label>
         </div>
         <div class="row"><button id="archive-go" class="primary" disabled>Hang the deck from these sets</button></div>
