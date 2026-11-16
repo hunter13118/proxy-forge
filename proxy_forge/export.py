@@ -102,6 +102,36 @@ def _cut_marks(d: ImageDraw.ImageDraw, lay: Layout) -> None:
             _dashed(d, (right + off, y), (pw - 1, y))
 
 
+def _grid_guides(d: ImageDraw.ImageDraw, lay: Layout) -> None:
+    """With a gap between the cards, dashed guides along every card edge inside the block (`_cut_marks` only reach outside it), drawn in the white space next to each edge, or as one
+    line down the middle when the gap is too narrow for two. Touching cards get none: a line between them would sit on the picture."""
+    g = lay.gap
+    if g <= 0:
+        return
+    (ox, oy), (cw, ch) = lay.origin, lay.card
+    bw, bh = lay.cols * cw + (lay.cols - 1) * g, lay.rows * ch + (lay.rows - 1) * g
+    half = MARK_W // 2
+
+    def centres(start: int, size: int, n: int) -> list[int]:
+        out = []
+        for i in range(n):
+            lo = start + i * (size + g)
+            hi = lo + size
+            if g < 3 * MARK_W:                                              # one line in the middle of a narrow gap
+                if i < n - 1:
+                    out.append(hi + g // 2)
+                continue
+            if i > 0:
+                out.append(lo - 1 - half)                                   # just outside this card's left / top edge
+            if i < n - 1:
+                out.append(hi + half)                                       # just outside its right / bottom edge
+        return out
+    for x in centres(ox, cw, lay.cols):
+        _dashed(d, (x, oy), (x, oy + bh))
+    for y in centres(oy, ch, lay.rows):
+        _dashed(d, (ox, y), (ox + bw, y))
+
+
 def sheets(images: list[Path], paper: str = "letter", size: str = "mtg", margin_mm: float = 5.0, gap_mm: float = 0.0, turn: str = "auto", marks: bool = True) -> list[Image.Image]:
     lay = best_layout(paper, size, margin_mm, gap_mm, turn)
     cw, ch = (lay.card[1], lay.card[0]) if lay.turned else lay.card
@@ -117,6 +147,7 @@ def sheets(images: list[Path], paper: str = "letter", size: str = "mtg", margin_
             page.paste(cache[p], lay.cell(n))
         if marks:
             _cut_marks(ImageDraw.Draw(page), lay)
+            _grid_guides(ImageDraw.Draw(page), lay)
         pages.append(page)
     return pages
 
@@ -208,19 +239,31 @@ def back_angle(lay: Layout, flip: str) -> int:
 BACK_BLEED_MM = 5.0                                                    # extra back picture past the cut on the cards along the outer border of the grid
 
 
-def _bleed_amounts(lay: Layout, cell: tuple[int, int], bleed_px: int) -> tuple[int, int, int, int]:
-    """How far the picture runs past the cut on each side (left, top, right, bottom), px. A side on the outside of the card block gets the full bleed. A side facing
-    a neighbour across the gap gets half the gap at most: the two neighbours' bleeds meet in the middle of the gap and never overlap, and a cut that wanders into the
-    white space is still covered. A side touching a neighbour (no gap) gets none. A mirrored slot stays on the block, a pixel or so either way, hence the tolerance."""
+def block_room(lay: Layout, margin_px: int) -> tuple[int, int, int, int]:
+    """Room between the card block and the printer's limit (left, top, right, bottom), px: how far a bleed on the outside of the block can run and still be printed."""
+    pw, ph = lay.page
+    w, h = lay.card
+    ox, oy = lay.origin
+    bw, bh = lay.cols * w + (lay.cols - 1) * lay.gap, lay.rows * h + (lay.rows - 1) * lay.gap
+    return (max(ox - margin_px, 0), max(oy - margin_px, 0), max(pw - (ox + bw) - margin_px, 0), max(ph - (oy + bh) - margin_px, 0))
+
+
+def _bleed_amounts(lay: Layout, cell: tuple[int, int], bleed_px: int, margin_px: int = 0) -> tuple[int, int, int, int]:
+    """How far the picture runs past the cut on each side (left, top, right, bottom), px. A side on the outside of the card block gets the full bleed, but no more than
+    the printer can reach (`margin_px` is the blank border it cannot print: bleed past that would be lost). A side facing a neighbour across the gap gets half the gap
+    at most: the two neighbours' bleeds meet in the middle of the gap and never overlap, and a cut that wanders into the white space is still covered. A side touching
+    a neighbour (no gap) gets none. A mirrored slot stays on the block, a pixel or so either way, hence the tolerance."""
     x, y = cell
     w, h = lay.card
     ox, oy = lay.origin
     bw, bh = lay.cols * w + (lay.cols - 1) * lay.gap, lay.rows * h + (lay.rows - 1) * lay.gap
+    pw, ph = lay.page
     tol = 2
 
-    def side(outer: bool) -> int:
-        return bleed_px if outer else min(bleed_px, lay.gap // 2)       # gap 0 -> 0: a touching side
-    return (side(abs(x - ox) <= tol), side(abs(y - oy) <= tol), side(abs(x + w - (ox + bw)) <= tol), side(abs(y + h - (oy + bh)) <= tol))
+    def side(outer: bool, room: int) -> int:
+        return min(bleed_px, max(room, 0)) if outer else min(bleed_px, (lay.gap + 1) // 2)   # gap 0 -> 0: a touching side; an odd gap overlaps by a pixel, so no white seam is left
+    return (side(abs(x - ox) <= tol, x - margin_px), side(abs(y - oy) <= tol, y - margin_px),
+            side(abs(x + w - (ox + bw)) <= tol, pw - (x + w) - margin_px), side(abs(y + h - (oy + bh)) <= tol, ph - (y + h) - margin_px))
 
 
 def _bleed(pic: Image.Image, amounts: tuple[int, int, int, int]) -> tuple[Image.Image, tuple[int, int]]:
@@ -245,7 +288,8 @@ def _bleed(pic: Image.Image, amounts: tuple[int, int, int, int]) -> tuple[Image.
 def duplex_pages(pairs: list[tuple[Path, Path | None]], paper: str = "letter", size: str = "mtg", margin_mm: float = 5.0, gap_mm: float = 0.0, turn: str = "auto", marks: bool = True,
                  flip: str = "long", dx_mm: float = 0.0, dy_mm: float = 0.0, back_bleed_mm: float = BACK_BLEED_MM) -> tuple[list[Image.Image], list[Image.Image]]:
     """(front pages, back pages), page i of each belonging to the same sheet. `pairs` is (front picture, back picture or None).
-    Backs on the outside edge of the card block get `back_bleed_mm` of extra picture past the cut, so a slightly off cut still leaves no white edge. The margin (>= 5 mm) holds it."""
+    Backs on the outside edge of the card block get `back_bleed_mm` of extra picture past the cut, so a slightly off cut still leaves no white edge, but never more than
+    the printer can reach (the margin is its blank border); facing a gap they get half the gap; touching, nothing (see `_bleed_amounts`)."""
     if flip not in FLIPS:
         raise ValueError("flip must be long or short")
     lay = best_layout(paper, size, margin_mm, gap_mm, turn)
@@ -272,11 +316,14 @@ def duplex_pages(pairs: list[tuple[Path, Path | None]], paper: str = "letter", s
             if back is not None:
                 base = back_cell(lay, n, flip)
                 pic = get(back, back_angle(lay, flip))
-                amounts = _bleed_amounts(lay, base, bl)
+                amounts = _bleed_amounts(lay, base, bl, _px(margin_mm))
                 l = t = 0
                 if any(amounts):
                     pic, (l, t) = _bleed(pic, amounts)
                 bp.paste(pic, (base[0] - l + dx, base[1] - t + dy))
+        if marks:                                                           # inside the block, over the pictures and any bleed in the gaps
+            _grid_guides(ImageDraw.Draw(fp), lay)
+            _grid_guides(ImageDraw.Draw(bp), lay)
         fronts.append(fp)
         backs.append(bp)
     return fronts, backs

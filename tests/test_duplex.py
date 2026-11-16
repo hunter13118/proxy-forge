@@ -156,7 +156,46 @@ def test_layout_route_matches_the_pdf_layout_and_a_gap_can_change_it(env):
     assert c.get("/api/layout?paper=letter&gap=0").json()["per_page"] == 9
     assert c.get("/api/layout?paper=letter&gap=3").json()["per_page"] < 9                              # 3 rows no longer fit the printable height with a gap
     assert c.get("/api/layout?paper=a4&gap=0").json()["card_mm"] == [63.0, 88.0]
+    room = c.get("/api/layout?paper=letter&gap=0").json()["room_mm"]
+    assert abs(room[1] - room[3]) < 0.1 and room[1] < 5 and abs(room[0] - room[2]) < 0.1 and room[0] > 5       # Letter: 2.7 mm of printable bleed above and below, 8.4 mm at the sides
     assert c.get("/api/layout?paper=foolscap").status_code == 400 and c.get("/api/layout?gap=99").status_code == 400
+
+
+def test_outside_bleed_is_capped_at_what_the_printer_can_reach(tmp_path):
+    """US Letter, 3 x 3: the block leaves 7.7 mm above and below, the printer cannot reach the outer 5 mm, so only 2.7 mm of bleed would print there. A4 has room for all 5."""
+    margin = export._px(5.0)
+    bleed = export._px(5.0)
+    lay = export.best_layout("letter", turn="never")
+    l, t, r, b = export.block_room(lay, margin)
+    assert t == lay.origin[1] - margin and abs(t - b) <= 1 and t < bleed and abs(l - r) <= 1 and min(l, r) >= bleed        # the block is centred to within a pixel
+    x, y = export.back_cell(lay, 0, "long")                                                       # a back in the top row
+    assert export._bleed_amounts(lay, (x, y), bleed, margin)[1] == t                                # top: capped; the sides keep the full bleed
+    assert export._bleed_amounts(lay, (lay.origin[0], y), bleed, margin)[0] == bleed
+    a4 = export.best_layout("a4", turn="never")
+    assert min(export.block_room(a4, margin)) >= bleed
+    blue = Image.new("RGB", (750, 1050), (0, 0, 255))
+    bp_ = tmp_path / "blue.png"
+    blue.save(bp_)
+    f, back = export.duplex_pages([(make(tmp_path, 0, "f"), bp_)], "letter", turn="never", marks=False)
+    assert back[0].getpixel((x + 300, y - t // 2)) == (0, 0, 255)                                 # inside the printable bleed
+    assert back[0].getpixel((x + 300, y - t - 6)) == (255, 255, 255)                              # past the printer's limit: nothing
+
+
+def test_guides_run_through_the_gaps_but_not_between_touching_cards(tmp_path):
+    ps = pairs(tmp_path, 6)
+    lay = export.best_layout("letter", turn="never", gap_mm=3.0)
+    f, b = export.duplex_pages(ps, "letter", turn="never", gap_mm=3.0, marks=True)
+    ink = (17, 17, 17)
+    x = lay.origin[0] + (lay.card[0] + lay.gap) - 3                                                # just left of the second column, in the gap
+    y = lay.origin[1] + lay.card[1] + lay.gap - 3                                                  # just above the second row, in the gap
+    for pg in (f[0], b[0]):
+        assert pg.getpixel((x, lay.origin[1] + 5)) == ink and pg.getpixel((lay.origin[0] + 5, y)) == ink
+        assert pg.getpixel((lay.origin[0] + 5, lay.origin[1] + 5)) != ink                         # the card itself is untouched
+    a4 = export.best_layout("a4", turn="never")                                                    # no gap: no guides on the pictures
+    on = export.duplex_pages(ps, "a4", turn="never", marks=True)[0][0]
+    off = export.duplex_pages(ps, "a4", turn="never", marks=False)[0][0]
+    box = (a4.origin[0], a4.origin[1], a4.origin[0] + 3 * a4.card[0], a4.origin[1] + 3 * a4.card[1])
+    assert on.crop(box).tobytes() == off.crop(box).tobytes()
 
 
 def test_bad_flip_is_refused(tmp_path):

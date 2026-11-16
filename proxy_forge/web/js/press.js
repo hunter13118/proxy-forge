@@ -14,7 +14,7 @@ async function getLayout(paper, gap) {
   const key = `${paper}:${gap}`;
   if (!layouts.has(key)) {
     try { layouts.set(key, await api(`/api/layout?paper=${paper}&gap=${gap}`)); }
-    catch (_) { return { cols: 3, rows: 3, turned: false, per_page: 9, page_mm: PAPER_MM[paper], card_mm: [63, 88] }; }       // server not answering: the plain 3 x 3
+    catch (_) { return { cols: 3, rows: 3, turned: false, per_page: 9, page_mm: PAPER_MM[paper], card_mm: [63, 88], room_mm: [5, 5, 5, 5] }; }       // server not answering: the plain 3 x 3
   }
   return layouts.get(key);
 }
@@ -124,16 +124,19 @@ export async function renderPress() {
       const m = o.flip === "long" ? r * cols + (cols - 1 - c) : (rows - 1 - r) * cols + c;
       const src = backOf(k, u);
       const mr = Math.floor(m / cols), mc = m % cols;               // the slot on the back page
-      const edge = (outer) => Math.round((outer ? L.bleed : Math.min(L.bleed, L.gap / 2)) * pxPerMm);
-      const amounts = [edge(mc === 0), edge(mr === 0), edge(mc === cols - 1), edge(mr === rows - 1)];
+      const edge = (outer, i) => Math.round((outer ? Math.min(L.bleed, lay.room_mm[i]) : Math.min(L.bleed, L.gap / 2)) * pxPerMm);   // outside: capped by what the printer reaches
+      const amounts = [edge(mc === 0, 0), edge(mr === 0, 1), edge(mc === cols - 1, 2), edge(mr === rows - 1, 3)];
       slots[m] = src ? bledBack(src, amounts, angle, turned) : blank();
     });
     cells = slots.map((x) => x || blank());
   }
   sheet.replaceChildren(...cells);
   const fb = d ? d.order.filter((k) => kindOf(d.units[k]) === "fallback").length : 0, ai = d ? d.order.filter((k) => kindOf(d.units[k]) === "ai").length : 0;
+  const [rl, rt, rr, rb] = lay.room_mm, capH = Math.min(rl, rr), capV = Math.min(rt, rb);                // outside bleed the printer can reach
+  const capNote = [capH < L.bleed - 0.05 ? `${capH.toFixed(1)} mm left and right` : "", capV < L.bleed - 0.05 ? `${capV.toFixed(1)} mm top and bottom` : ""].filter(Boolean).join(", ");
   $("sheet-cap").textContent = !list.length ? "" : side === "front" ? `The first sheet, to scale (${lay.per_page} cards a sheet). Dashed lines are cuts.`
-    : `The back of the first sheet, as it prints (${o.flip === "long" ? "columns" : "rows"} mirrored so each back lands behind its front). Dashed lines are cuts. The picture past them is the bleed: on the outside of the sheet, and in any gap.` + (hasBacks ? "" : " No back chosen yet: pick one in the Source step.");
+    : `The back of the first sheet, as it prints (${o.flip === "long" ? "columns" : "rows"} mirrored so each back lands behind its front). Dashed lines are cuts. The picture past them is the bleed: on the outside of the sheet, and in any gap.`
+      + (capNote ? ` The printer cannot reach further out, so the outside bleed is limited to ${capNote}.` : "") + (hasBacks ? "" : " No back chosen yet: pick one in the Source step.");
   const sheets = Math.ceil(list.length / lay.per_page);
   const notes = [];
   if (fb || ai) notes.push(h("small", {}, [fb ? `${fb} still amber (not in the chosen sets)` : "", ai ? `${ai} drawn with AI` : ""].filter(Boolean).join(" · ")));

@@ -413,7 +413,9 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
         except ValueError as e:
             raise HTTPException(400, str(e))
         w, h = export.CARD_MM[size]
-        return {"cols": lay.cols, "rows": lay.rows, "turned": lay.turned, "per_page": lay.per_page, "page_mm": list(export.PAPER_MM[paper]), "card_mm": [h, w] if lay.turned else [w, h]}
+        room = [round(px / export.DPI * export.MM, 2) for px in export.block_room(lay, export._px(margin))]       # how much outside bleed the printer can reach: left, top, right, bottom
+        return {"cols": lay.cols, "rows": lay.rows, "turned": lay.turned, "per_page": lay.per_page, "page_mm": list(export.PAPER_MM[paper]), "card_mm": [h, w] if lay.turned else [w, h],
+                "room_mm": room}
 
     @app.get("/api/duplex-test.pdf")
     def duplex_test(paper: str = "letter", size: str = "mtg", flip: str = "long", turn: str = "auto", margin: float = 5.0, back_dx: float = 0.0, back_dy: float = 0.0):
