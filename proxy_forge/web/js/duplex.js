@@ -5,9 +5,13 @@ const PRESETS = { "auto-long": { mode: "auto", flip: "long" }, "manual-long": { 
 
 export const opts = () => ({ mode: $("d-mode").value, flip: $("d-flip").value, rev: $("d-rev").checked, split: $("d-split").checked, dx: parseFloat($("d-dx").value) || 0, dy: parseFloat($("d-dy").value) || 0 });
 
+// The Press page's layout values: the gap between cards and how far a back runs past its cut (both mm).
+const mmInput = (id, dflt) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? Math.max(0, v) : dflt; };
+export const layout = () => ({ gap: mmInput("p-gap", 0), bleed: mmInput("p-bleed", 5) });
+
 export function query() {
   const o = opts();
-  return o.mode === "none" ? "" : `&duplex=${o.mode}&flip=${o.flip}&reverse_backs=${o.rev}&back_dx=${o.dx}&back_dy=${o.dy}`;
+  return o.mode === "none" ? "" : `&duplex=${o.mode}&flip=${o.flip}&reverse_backs=${o.rev}&back_dx=${o.dx}&back_dy=${o.dy}&bleed=${layout().bleed}`;
 }
 
 function note() {
@@ -72,6 +76,8 @@ export function wireDuplex() {
   $("d-preset").onchange = () => { const p = PRESETS[$("d-preset").value]; if (p) { $("d-mode").value = p.mode; $("d-flip").value = p.flip; syncDuplex(); emitChange(); } };
   $("d-help").onclick = () => { $("help-body").replaceChildren(h("h2", {}, "Printing two-sided"), ...helpHtml()); $("help").showModal(); };
   $("help-close").onclick = () => $("help").close();
+  try { const g = JSON.parse(recall("layout") || "{}"); if (g.gap !== undefined) $("p-gap").value = g.gap; if (g.bleed !== undefined) $("p-bleed").value = g.bleed; } catch (_) {}
+  for (const id of ["p-gap", "p-bleed"]) $(id).oninput = () => { remember("layout", JSON.stringify(layout())); emitChange(); };
   $("d-test").onclick = () => saveAs(`/api/duplex-test.pdf?paper=${$("p-paper").value}&flip=${$("d-flip").value}&back_dx=${opts().dx}&back_dy=${opts().dy}`, `duplex-test-${$("p-paper").value}-${$("d-flip").value}.pdf`);
   syncDuplex();
 }
@@ -79,7 +85,7 @@ let emitChange = () => {};
 export const onDuplexChange = (fn) => { emitChange = fn; };
 
 export function download() {
-  const o = opts(), base = `/api/decks/${S.deck.id}/export.pdf?paper=${$("p-paper").value}&copies=${$("p-copies").checked}&skip_basics=${$("skip-basics").checked}${query()}`;
+  const o = opts(), base = `/api/decks/${S.deck.id}/export.pdf?paper=${$("p-paper").value}&copies=${$("p-copies").checked}&skip_basics=${$("skip-basics").checked}&gap=${layout().gap}${query()}`;
   const name = `${S.deck.name}-${$("p-paper").value}`;
   if (o.mode === "manual" && o.split) { saveAs(base + "&part=fronts", `${name}-fronts.pdf`); setTimeout(() => saveAs(base + "&part=backs", `${name}-backs.pdf`), 600); toast("Saving the fronts and the backs as two PDFs."); }
   else saveAs(base, `${name}${o.mode === "none" ? "" : "-" + o.mode}.pdf`);

@@ -10,7 +10,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 
 DPI = 300
 MM = 25.4
@@ -205,14 +205,53 @@ def back_angle(lay: Layout, flip: str) -> int:
     return 90 if lay.turned else 180
 
 
+BACK_BLEED_MM = 5.0                                                    # extra back picture past the cut on the cards along the outer border of the grid
+
+
+def _bleed_amounts(lay: Layout, cell: tuple[int, int], bleed_px: int) -> tuple[int, int, int, int]:
+    """How far the picture runs past the cut on each side (left, top, right, bottom), px. A side on the outside of the card block gets the full bleed. A side facing
+    a neighbour across the gap gets half the gap at most: the two neighbours' bleeds meet in the middle of the gap and never overlap, and a cut that wanders into the
+    white space is still covered. A side touching a neighbour (no gap) gets none. A mirrored slot stays on the block, a pixel or so either way, hence the tolerance."""
+    x, y = cell
+    w, h = lay.card
+    ox, oy = lay.origin
+    bw, bh = lay.cols * w + (lay.cols - 1) * lay.gap, lay.rows * h + (lay.rows - 1) * lay.gap
+    tol = 2
+
+    def side(outer: bool) -> int:
+        return bleed_px if outer else min(bleed_px, lay.gap // 2)       # gap 0 -> 0: a touching side
+    return (side(abs(x - ox) <= tol), side(abs(y - oy) <= tol), side(abs(x + w - (ox + bw)) <= tol), side(abs(y + h - (oy + bh)) <= tol))
+
+
+def _bleed(pic: Image.Image, amounts: tuple[int, int, int, int]) -> tuple[Image.Image, tuple[int, int]]:
+    """The picture with extra image on each side (`amounts`, px), continued by mirroring its edge (so the pattern runs on past the cut). Returns the new picture and
+    the (left, top) offset of the original inside it."""
+    l, t, r, b = amounts
+    w, h = pic.size
+    out = Image.new("RGB", (w + l + r, h + t + b))
+    out.paste(pic, (l, t))
+    if l:
+        out.paste(ImageOps.mirror(pic.crop((0, 0, l, h))), (0, t))
+    if r:
+        out.paste(ImageOps.mirror(pic.crop((w - r, 0, w, h))), (l + w, t))
+    W = out.width
+    if t:                                                                   # top and bottom run the full width, so the corners follow the side strips
+        out.paste(ImageOps.flip(out.crop((0, t, W, 2 * t))), (0, 0))
+    if b:
+        out.paste(ImageOps.flip(out.crop((0, t + h - b, W, t + h))), (0, t + h))
+    return out, (l, t)
+
+
 def duplex_pages(pairs: list[tuple[Path, Path | None]], paper: str = "letter", size: str = "mtg", margin_mm: float = 5.0, gap_mm: float = 0.0, turn: str = "auto", marks: bool = True,
-                 flip: str = "long", dx_mm: float = 0.0, dy_mm: float = 0.0) -> tuple[list[Image.Image], list[Image.Image]]:
-    """(front pages, back pages), page i of each belonging to the same sheet. `pairs` is (front picture, back picture or None)."""
+                 flip: str = "long", dx_mm: float = 0.0, dy_mm: float = 0.0, back_bleed_mm: float = BACK_BLEED_MM) -> tuple[list[Image.Image], list[Image.Image]]:
+    """(front pages, back pages), page i of each belonging to the same sheet. `pairs` is (front picture, back picture or None).
+    Backs on the outside edge of the card block get `back_bleed_mm` of extra picture past the cut, so a slightly off cut still leaves no white edge. The margin (>= 5 mm) holds it."""
     if flip not in FLIPS:
         raise ValueError("flip must be long or short")
     lay = best_layout(paper, size, margin_mm, gap_mm, turn)
     cw, ch = (lay.card[1], lay.card[0]) if lay.turned else lay.card
     dx, dy = _px(dx_mm), _px(dy_mm)
+    bl = _px(back_bleed_mm)
     cache: dict = {}
 
     def get(p: Path, angle: int) -> Image.Image:
@@ -225,13 +264,19 @@ def duplex_pages(pairs: list[tuple[Path, Path | None]], paper: str = "letter", s
     fronts, backs = [], []
     for start in range(0, len(pairs), lay.per_page):
         fp, bp = Image.new("RGB", lay.page, "white"), Image.new("RGB", lay.page, "white")
+        if marks:                                                           # drawn first: a back's bleed may cover a guide lying 0.7 mm or more outside the card
+            _cut_marks(ImageDraw.Draw(fp), lay)
+            _cut_marks(ImageDraw.Draw(bp), lay)
         for n, (front, back) in enumerate(pairs[start:start + lay.per_page]):
             fp.paste(get(front, 90 if lay.turned else 0), lay.cell(n))
             if back is not None:
-                bp.paste(get(back, back_angle(lay, flip)), back_cell(lay, n, flip, dx, dy))
-        if marks:
-            _cut_marks(ImageDraw.Draw(fp), lay)
-            _cut_marks(ImageDraw.Draw(bp), lay)
+                base = back_cell(lay, n, flip)
+                pic = get(back, back_angle(lay, flip))
+                amounts = _bleed_amounts(lay, base, bl)
+                l = t = 0
+                if any(amounts):
+                    pic, (l, t) = _bleed(pic, amounts)
+                bp.paste(pic, (base[0] - l + dx, base[1] - t + dy))
         fronts.append(fp)
         backs.append(bp)
     return fronts, backs

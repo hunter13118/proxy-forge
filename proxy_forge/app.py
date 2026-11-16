@@ -374,9 +374,9 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
 
     @app.get("/api/decks/{did}/export.pdf")
     def export_pdf(did: str, paper: str = "letter", copies: bool = True, size: str = "mtg", margin: float = 5.0, gap: float = 0.0, turn: str = "auto", marks: bool = True, skip_basics: bool = False,
-                   duplex: str = "none", flip: str = "long", part: str = "all", reverse_backs: bool = False, back_dx: float = 0.0, back_dy: float = 0.0):
+                   duplex: str = "none", flip: str = "long", part: str = "all", reverse_backs: bool = False, back_dx: float = 0.0, back_dy: float = 0.0, bleed: float = 5.0):
         d = _need(store.get_deck(did), "no such deck")
-        if paper not in export.PAPER or size not in export.CARD_MM or turn not in ("auto", "never", "always") or not 0 <= margin <= 30 or not 0 <= gap <= 20:
+        if paper not in export.PAPER or size not in export.CARD_MM or turn not in ("auto", "never", "always") or not 0 <= margin <= 30 or not 0 <= gap <= 20 or not 0 <= bleed <= 10:
             raise HTTPException(400, "bad print options")
         if duplex not in ("none", "auto", "manual") or flip not in export.FLIPS or part not in ("all", "fronts", "backs") or not -5 <= back_dx <= 5 or not -5 <= back_dy <= 5:
             raise HTTPException(400, "bad two-sided options")
@@ -388,7 +388,7 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
             if not any(b for _, b in pairs):
                 raise HTTPException(400, "this deck has no back yet: choose one in the Source step (Card backs)")
             try:
-                f, b = export.duplex_pages(pairs, paper, size, margin, gap, turn, marks, flip, back_dx, back_dy)
+                f, b = export.duplex_pages(pairs, paper, size, margin, gap, turn, marks, flip, back_dx, back_dy, back_bleed_mm=bleed)
                 pdf = export.pages_pdf(export.duplex_order(f, b, duplex, part, reverse_backs))
             except ValueError as e:
                 raise HTTPException(400, str(e))
@@ -402,6 +402,18 @@ def create_app(engine: Engine | None = None, clerk=None, tunnel_token: str | Non
         except ValueError as e:
             raise HTTPException(400, str(e))
         return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}-{paper}.pdf"'})
+
+    @app.get("/api/layout")
+    def sheet_layout(paper: str = "letter", size: str = "mtg", margin: float = 5.0, gap: float = 0.0, turn: str = "auto"):
+        """How many cards fit on a page and how they sit, from the same function the PDF uses. The Press page draws its preview from this, so the two never disagree."""
+        if paper not in export.PAPER or size not in export.CARD_MM or turn not in ("auto", "never", "always") or not 0 <= margin <= 30 or not 0 <= gap <= 20:
+            raise HTTPException(400, "bad print options")
+        try:
+            lay = export.best_layout(paper, size, margin, gap, turn)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        w, h = export.CARD_MM[size]
+        return {"cols": lay.cols, "rows": lay.rows, "turned": lay.turned, "per_page": lay.per_page, "page_mm": list(export.PAPER_MM[paper]), "card_mm": [h, w] if lay.turned else [w, h]}
 
     @app.get("/api/duplex-test.pdf")
     def duplex_test(paper: str = "letter", size: str = "mtg", flip: str = "long", turn: str = "auto", margin: float = 5.0, back_dx: float = 0.0, back_dy: float = 0.0):

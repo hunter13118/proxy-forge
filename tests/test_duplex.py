@@ -103,6 +103,62 @@ def test_a_missing_back_leaves_its_slot_blank_but_keeps_the_page(tmp_path):
     assert len(b) == 1 and b[0].convert("L").getextrema() == (255, 255)                           # a blank back page: sheets stay in step
 
 
+def test_backs_on_the_outside_of_the_grid_bleed_5mm_past_the_cut(tmp_path):
+    """A back with a green strip down its left edge: the cards on the grid's left column get that strip continued 5 mm (59 px) outside the cut; interior cards get nothing extra."""
+    green = Image.new("RGB", (750, 1050), (0, 0, 255))
+    ImageDraw.Draw(green).rectangle((0, 0, 39, 1049), fill=(0, 255, 0))
+    bp_ = tmp_path / "green.png"
+    green.save(bp_)
+    ps = [(make(tmp_path, n, "f"), bp_) for n in range(9)]
+    f, b = export.duplex_pages(ps, "a4", turn="never", flip="long", marks=False)
+    lay = export.best_layout("a4", turn="never")
+    for n in range(9):
+        x, y = export.back_cell(lay, n, "long")
+        outer = abs(x - lay.origin[0]) <= 2
+        if outer:
+            assert b[0].getpixel((x - 30, y + 500)) == (0, 255, 0)                                  # inside the bleed: the strip goes on
+            assert b[0].getpixel((x - 70, y + 500)) == (255, 255, 255)                              # past 5 mm: plain paper again
+    assert export.duplex_pages(ps, "a4", turn="never", marks=False, back_bleed_mm=0)[1][0].tobytes() != b[0].tobytes()
+
+
+def test_with_a_gap_the_bleed_runs_into_the_white_space_and_stops_there(tmp_path):
+    """Sides that face white space (the gap, or the outside of the block) take bleed; a bleed longer than the gap is clamped to it, so it never reaches the neighbour's card."""
+    green = Image.new("RGB", (750, 1050), (0, 0, 255))
+    ImageDraw.Draw(green).rectangle((0, 0, 39, 1049), fill=(0, 255, 0))
+    bp_ = tmp_path / "green2.png"
+    green.save(bp_)
+    ps = [(make(tmp_path, n, "f"), bp_) for n in range(9)]
+    gap_mm = 2.0
+    f, b = export.duplex_pages(ps, "a4", turn="never", flip="long", marks=False, gap_mm=gap_mm)
+    lay = export.best_layout("a4", turn="never", gap_mm=gap_mm)
+    bleed = export._px(5.0)
+    gap = export._px(gap_mm)
+    assert lay.gap == gap
+    interior = [n for n in range(9) if abs(export.back_cell(lay, n, "long")[0] - lay.origin[0]) > 2]
+    for n in interior:
+        x, y = export.back_cell(lay, n, "long")
+        assert export._bleed_amounts(lay, (x, y), bleed)[0] == gap // 2                           # half the gap: the neighbours' bleeds meet, never overlap
+        assert b[0].getpixel((x - gap // 4, y + 500)) == (0, 255, 0)                              # the bleed is in the white space
+    x, y = export.back_cell(lay, 0, "long") if abs(export.back_cell(lay, 0, "long")[0] - lay.origin[0]) <= 2 else export.back_cell(lay, 2, "long")
+    assert export._bleed_amounts(lay, (x, y), bleed)[0] == bleed                                  # on the outside, the full 5 mm
+
+
+def test_layout_route_matches_the_pdf_layout_and_a_gap_can_change_it(env):
+    from fastapi.testclient import TestClient
+
+    from proxy_forge.app import create_app
+    eng, _ = env
+    c = TestClient(create_app(eng))
+    for paper, gap in (("a4", 0), ("letter", 0), ("letter", 3), ("a4", 6)):
+        lay = export.best_layout(paper, "mtg", 5.0, float(gap), "auto")
+        r = c.get(f"/api/layout?paper={paper}&gap={gap}").json()
+        assert (r["cols"], r["rows"], r["turned"], r["per_page"]) == (lay.cols, lay.rows, lay.turned, lay.per_page)
+    assert c.get("/api/layout?paper=letter&gap=0").json()["per_page"] == 9
+    assert c.get("/api/layout?paper=letter&gap=3").json()["per_page"] < 9                              # 3 rows no longer fit the printable height with a gap
+    assert c.get("/api/layout?paper=a4&gap=0").json()["card_mm"] == [63.0, 88.0]
+    assert c.get("/api/layout?paper=foolscap").status_code == 400 and c.get("/api/layout?gap=99").status_code == 400
+
+
 def test_bad_flip_is_refused(tmp_path):
     with pytest.raises(ValueError):
         export.duplex_pages(pairs(tmp_path, 1), flip="diagonal")
